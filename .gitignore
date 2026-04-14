@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+.DS_Store
+rescue-frontend/node_modules/
+rescue-frontend/dist/
+rescue-frontend/.env
