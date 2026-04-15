@@ -32,6 +32,9 @@ pool.query('ALTER TABLE incidents ADD COLUMN resolved_at TIMESTAMP NULL').catch(
 pool.query('ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL').catch(()=>{});
 pool.query('UPDATE users SET phone = "081-669-1234" WHERE role = "Rescue"').catch(()=>{});
 
+// Auto-migrate parent incident link for Backup feature
+pool.query('ALTER TABLE incidents ADD COLUMN parent_incident_id INT NULL').catch(()=>{});
+
 const redisClient = redis.createClient({ url: 'redis://127.0.0.1:6379' });
 redisClient.on('error', (err) => console.log('Redis error:', err));
 redisClient.connect().then(() => console.log('Connected to Redis'));
@@ -66,12 +69,15 @@ setInterval(async () => {
         for (const inc of rows) {
             if (!dispatchState[inc.id]) { 
                 const nearbyDriverIds = await redisClient.sendCommand(['GEORADIUS', 'online_rescuers', inc.longitude.toString(), inc.latitude.toString(), '50', 'km', 'ASC']);
+                console.log(`[SYS] 5s Loop: Found Pending SOS #${inc.id}, Nearby drivers: ${nearbyDriverIds.join(',')}`);
                 if (nearbyDriverIds.length > 0) {
                      broadcastOffer(inc.id, nearbyDriverIds, { details: inc.details, latitude: inc.latitude, longitude: inc.longitude, citizen_phone: inc.citizen_phone });
                 }
+            } else {
+                console.log(`[SYS] 5s Loop: Incident #${inc.id} is already ringing, ignoring...`);
             }
         }
-    } catch(e) {}
+    } catch(e) { console.error("[SYS] 5s Loop Error:", e); }
 }, 5000);
 
 // 1. Auth API
@@ -180,9 +186,12 @@ app.post('/api/incidents/:id/accept', verifyToken, async (req, res) => {
 
         const [driverRows] = await pool.query('SELECT username, phone FROM users WHERE id = ?', [driver_id]);
         const rescuerInfo = driverRows[0] || {};
+        
+        const [incRows] = await pool.query('SELECT parent_incident_id FROM incidents WHERE id = ?', [incident_id]);
+        const parent_id = incRows.length > 0 && incRows[0].parent_incident_id ? incRows[0].parent_incident_id : incident_id;
 
-        // Notify Citizen
-        io.to(`incident_room_${incident_id}`).emit('driver_assigned', { incident_id, driver_id, driver_name: rescuerInfo.username, driver_phone: rescuerInfo.phone });
+        // Notify Citizen (and primary driver)
+        io.to(`incident_room_${parent_id}`).emit('driver_assigned', { incident_id, driver_id, driver_name: rescuerInfo.username, driver_phone: rescuerInfo.phone });
         res.json({ message: 'Mission Accepted Successfully' });
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -193,6 +202,42 @@ app.post('/api/incidents/:id/reject', verifyToken, async (req, res) => {
     // Just tell their personal device to drop the modal. The system waits for someone else, or re-blasts in 30s.
     io.to(`driver_${req.user.id}`).emit('cancel_offer', { incident_id }); 
     res.json({ message: 'Mission Rejected' });
+});
+
+// Driver Request Backup
+app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
+    try {
+        const parent_id = req.params.id;
+        
+        const [counts] = await pool.query('SELECT COUNT(*) as count FROM incidents WHERE parent_incident_id = ? AND status != "Resolved"', [parent_id]);
+        if (counts[0].count >= 3) return res.status(400).json({ error: 'ถึงจำกัดการขอกำลังเสริมแล้ว (Max 3 units)' });
+
+        const [parents] = await pool.query('SELECT * FROM incidents WHERE id = ?', [parent_id]);
+        if (parents.length === 0) return res.status(404).json({ error: 'Incident not found' });
+        const p = parents[0];
+
+        const [recent] = await pool.query('SELECT created_at FROM incidents WHERE parent_incident_id = ? ORDER BY id DESC LIMIT 1', [parent_id]);
+        if (recent.length > 0) {
+            const msSinceLast = new Date() - new Date(recent[0].created_at);
+            if (msSinceLast < 60000) return res.status(400).json({ error: 'โปรดรอ 1 นาทีก่อนขอกำลังเสริมอีกครั้ง (Cooldown 60s)' });
+        }
+
+        const details = `[🚨 BACKUP] ${p.details}`;
+        const [result] = await pool.query(
+            'INSERT INTO incidents (details, latitude, longitude, status, citizen_phone, parent_incident_id) VALUES (?, ?, ?, ?, ?, ?)',
+            [details, p.latitude, p.longitude, 'Pending', p.citizen_phone, parent_id]
+        );
+        const incident_id = result.insertId;
+
+        const nearbyDriverIds = await redisClient.sendCommand(['GEORADIUS', 'online_rescuers', p.longitude.toString(), p.latitude.toString(), '50', 'km', 'ASC']);
+        const eligibleDrivers = nearbyDriverIds.filter(id => id != req.user.id);
+        if (eligibleDrivers.length > 0) {
+            broadcastOffer(incident_id, eligibleDrivers, { details, latitude: p.latitude, longitude: p.longitude, citizen_phone: p.citizen_phone, parent_incident_id: parent_id });
+        }
+        
+        io.to(`incident_room_${parent_id}`).emit('new_chat_message', { sender: 'System', message: `🚨 รถพยาบาลคันแรกได้แจ้งขอกำลังเสริม! เตรียมพบทีมที่ ${counts[0].count + 2}`, timestamp: new Date() });
+        res.json({ message: 'Backup requested', incident_id });
+    } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Admin System Status & Analytics
@@ -245,22 +290,21 @@ app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
         }
         
         console.log("[DEBUG] Fetching assigned_user_id...");
-        const [rows] = await pool.query('SELECT assigned_user_id FROM incidents WHERE id = ?', [incident_id]);
+        const [assignedRows] = await pool.query('SELECT assigned_user_id FROM incidents WHERE (id = ? OR parent_incident_id = ?) AND assigned_user_id IS NOT NULL', [incident_id, incident_id]);
         
-        if (rows.length > 0 && rows[0].assigned_user_id) {
-            console.log("[DEBUG] Rescuer found, updating redis...");
-            const did = rows[0].assigned_user_id;
-            const statStr = await redisClient.get(`rescuer_status:${did}`);
+        for (const user of assignedRows) {
+            const uid = user.assigned_user_id;
+            const statStr = await redisClient.get(`rescuer_status:${uid}`);
             if(statStr) {
                let stat = JSON.parse(statStr);
                stat.status = 'available';
-               await redisClient.set(`rescuer_status:${did}`, JSON.stringify(stat));
-               await redisClient.sendCommand(['GEOADD', 'online_rescuers', stat.longitude.toString(), stat.latitude.toString(), did.toString()]);
+               await redisClient.set(`rescuer_status:${uid}`, JSON.stringify(stat));
+               await redisClient.sendCommand(['GEOADD', 'online_rescuers', stat.longitude.toString(), stat.latitude.toString(), uid.toString()]);
             }
         }
         
         console.log("[DEBUG] Updating DB status to Resolved...");
-        await pool.query('UPDATE incidents SET status = "Resolved" WHERE id = ?', [incident_id]);
+        await pool.query('UPDATE incidents SET status = "Resolved" WHERE id = ? OR parent_incident_id = ?', [incident_id, incident_id]);
         
         console.log("[DEBUG] Emitting sockets...");
         io.to(`incident_room_${incident_id}`).emit('no_drivers'); // Signal Citizen to stop waiting
@@ -284,19 +328,24 @@ app.get('/api/incidents/active', verifyToken, async (req, res) => {
 // Driver complete case
 app.post('/api/incidents/:id/complete', verifyToken, async (req, res) => {
     try {
-        await pool.query('UPDATE incidents SET status = "Resolved", resolved_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+        await pool.query('UPDATE incidents SET status = "Resolved", resolved_at = CURRENT_TIMESTAMP WHERE id = ? OR parent_incident_id = ?', [req.params.id, req.params.id]);
 
-        const statStr = await redisClient.get(`rescuer_status:${req.user.id}`);
-        if(statStr) {
-            let stat = JSON.parse(statStr);
-            stat.status = 'available';
-            await redisClient.set(`rescuer_status:${req.user.id}`, JSON.stringify(stat));
-            // Add back to GeoRadius map immediately so they can receive the next job
-            await redisClient.sendCommand(['GEOADD', 'online_rescuers', stat.longitude.toString(), stat.latitude.toString(), req.user.id.toString()]);
+        const [assignedRows] = await pool.query('SELECT assigned_user_id FROM incidents WHERE (id = ? OR parent_incident_id = ?) AND assigned_user_id IS NOT NULL', [req.params.id, req.params.id]);
+        for (const user of assignedRows) {
+            const uid = user.assigned_user_id;
+            const statStr = await redisClient.get(`rescuer_status:${uid}`);
+            if(statStr) {
+                let stat = JSON.parse(statStr);
+                stat.status = 'available';
+                await redisClient.set(`rescuer_status:${uid}`, JSON.stringify(stat));
+                await redisClient.sendCommand(['GEOADD', 'online_rescuers', stat.longitude.toString(), stat.latitude.toString(), uid.toString()]);
+            }
         }
 
-        // Emit to citizen room so they know it is over
-        io.to(`incident_room_${req.params.id}`).emit('mission_completed', { message: 'Mission Complete' });
+        const [incRows] = await pool.query('SELECT parent_incident_id FROM incidents WHERE id = ?', [req.params.id]);
+        const parent_id = incRows.length > 0 && incRows[0].parent_incident_id ? incRows[0].parent_incident_id : req.params.id;
+
+        io.to(`incident_room_${parent_id}`).emit('mission_completed', { message: 'Mission Cascaded Complete' });
 
         res.json({ message: 'Mission Completed' });
     } catch (error) { res.status(500).json({ error: error.message }); }

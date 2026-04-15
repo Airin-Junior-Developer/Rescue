@@ -150,11 +150,11 @@ function CommandCenter({ user, onLogout }) {
             <button onClick={async () => {
                 try {
                    await axios.post(`http://127.0.0.1:3000/api/incidents/${incomingMission.incident_id}/accept`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
-                   const missionData = { id: incomingMission.incident_id, latitude: incomingMission.latitude, longitude: incomingMission.longitude, details: incomingMission.details, citizen_phone: incomingMission.citizen_phone };
+                   const missionData = { id: incomingMission.incident_id, latitude: incomingMission.latitude, longitude: incomingMission.longitude, details: incomingMission.details, citizen_phone: incomingMission.citizen_phone, parent_incident_id: incomingMission.parent_incident_id };
                    setActiveMission(missionData);
                    setIncomingMission(null);
                    toast.success("✅ รับงานเรียบร้อย นำทางทันที!");
-                   socket.emit('join_incident_room', incomingMission.incident_id);
+                   socket.emit('join_incident_room', incomingMission.parent_incident_id || incomingMission.incident_id);
                 } catch(e) {
                    toast.error('❌ ไม่สามารถรับงานได้: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์ขัดข้อง'));
                    setIncomingMission(null);
@@ -180,11 +180,28 @@ function CommandCenter({ user, onLogout }) {
             <h2 style={{ margin: 0 }}>🚨 Active Mission #{activeMission.id}</h2>
             <p style={{ margin: 0 }}>{activeMission.details}</p>
           </div>
-          <button onClick={completeMission} className="btn" style={{ background: '#10b981', color: 'white', fontWeight: 'bold' }}>Complete Mission ✅</button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={async () => {
+              if (window.confirm('คุณต้องการเรียกขอกำลังเสริม 1 คันมายังจุดนี้ใช่หรือไม่?')) {
+                try {
+                  await axios.post(`http://127.0.0.1:3000/api/incidents/${activeMission.parent_incident_id || activeMission.id}/backup`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+                  toast.success('วิทยุขอกำลังเสริมแล้ว! ระบบกำลังกระจายงานให้รถคันอื่นในพื้นที่');
+                } catch (e) {
+                  toast.error(e.response?.data?.error || 'เซิร์ฟเวอร์ขัดข้อง');
+                }
+              }
+            }} className="btn" style={{ background: '#f59e0b', color: 'white', fontWeight: 'bold' }}>🚨 กำลังเสริม</button>
+            <button onClick={() => { if(window.confirm('คุณแน่ใจหรือไม่ว่าช่วยเหลือเสร็จสิ้นแล้ว? (ส่งผู้ป่วยถึงมือแพทย์ปลอดภัยแล้ว)')) completeMission(); }} className="btn" style={{ background: '#10b981', color: 'white', fontWeight: 'bold' }}>Complete Mission ✅</button>
+          </div>
         </header>
 
         <div style={{ flex: 1, position: 'relative' }}>
-          <MapContainer center={[lat, lng]} zoom={14} style={{ height: '100%', width: '100%' }}>
+          <button 
+            title="กลับจุดศูนย์กลาง"
+            onClick={() => { if(mapRef.current) mapRef.current.flyTo([lat, lng], 14) }}
+            style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 1000, width: '50px', height: '50px', borderRadius: '50%', background: '#1e293b', border: '2px solid #334155', cursor: 'pointer', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}
+          >📍</button>
+          <MapContainer center={[lat, lng]} zoom={14} style={{ height: '100%', width: '100%' }} ref={mapRef}>
              <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
              <Marker position={[activeMission.latitude, activeMission.longitude]} icon={RedIcon}>
                <Popup>จุดเกิดเหตุ (Citizen)</Popup>
