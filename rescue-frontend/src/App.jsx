@@ -28,7 +28,9 @@ function App() {
       <Routes>
         <Route path="/" element={<CitizenSOS />} />
         <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/dashboard" />} />
-        <Route path="/dashboard" element={user ? <CommandCenter user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
+        <Route path="/dashboard" element={
+            user ? <CommandCenter user={user} onLogout={handleLogout} /> : <Navigate to="/login" />
+        } />
       </Routes>
     </BrowserRouter>
   );

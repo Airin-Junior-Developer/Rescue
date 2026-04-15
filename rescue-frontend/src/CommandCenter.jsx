@@ -17,6 +17,7 @@ const socket = io('http://127.0.0.1:3000');
 function CommandCenter({ user, onLogout }) {
   const [isOnline, setIsOnline] = useState(false);
   const [activeMission, setActiveMission] = useState(null);
+  const [incomingMission, setIncomingMission] = useState(null);
   
   // Driver Live GPS
   const [lat, setLat] = useState(13.7463);
@@ -39,21 +40,33 @@ function CommandCenter({ user, onLogout }) {
        setLng(prev => prev + (Math.random() - 0.5) * 0.0002);
     }, 10000);
 
-    // 3. Listen for Auto-Dispatched Cases!
-    socket.on('auto_dispatched_case', (mission) => {
-       toast.error('🚨 NEW MISSION AUTO-ASSIGNED!');
-       setActiveMission(mission);
-       socket.emit('join_incident_room', mission.id);
+    // 3. Listen for Mission Offers (Broadcast System)
+    socket.on('offer_mission', (mission) => {
+       toast.warning('🚨 มีงานด่วนโซนคุณ! (ใครกดก่อนได้ก่อน)!', { autoClose: 30000 });
+       setIncomingMission(mission);
+    });
+
+    socket.on('cancel_offer', (data) => {
+       setIncomingMission(curr => {
+           if (curr && curr.incident_id === data.incident_id) return null;
+           return curr;
+       });
     });
 
     socket.on('new_chat_message', (msg) => {
       setChatMessages(prev => [...prev, msg]);
     });
 
+    socket.on('admin_broadcast', (data) => {
+       toast.error(`📢 ประกาศจากศูนย์กลาง:\n${data.message}`, { autoClose: 20000, theme: 'colored' });
+    });
+
     return () => {
       clearInterval(gpsInterval.current);
-      socket.off('auto_dispatched_case');
+      socket.off('offer_mission');
+      socket.off('cancel_offer');
       socket.off('new_chat_message');
+      socket.off('admin_broadcast');
     };
   }, []);
 
@@ -99,9 +112,17 @@ function CommandCenter({ user, onLogout }) {
           toast.success("✅ Mission Completed successfully!");
           setActiveMission(null);
           setChatMessages([]);
-          // Force reset to offline so they can take a break
-          setIsOnline(false); 
-      } catch (e) { toast.error("Failed to complete mission: " + (e.response?.data?.error || e.message)); }
+          // Driver stays online automatically for the next job!
+          
+      } catch (e) { 
+          if (e.response?.status === 403 || e.response?.data?.error === 'Invalid Token') {
+              toast.error("เซสชันหมดอายุแล้ว กรุณาล็อกอินใหม่");
+              localStorage.removeItem('token');
+              setTimeout(() => { window.location.href = '/login'; }, 1500);
+          } else {
+              toast.error("Failed to complete mission: " + (e.response?.data?.error || e.message)); 
+          }
+      }
   };
 
   const sendMessage = () => {
@@ -111,6 +132,44 @@ function CommandCenter({ user, onLogout }) {
     });
     setChatInput('');
   };
+
+  // --------------- RENDER INCOMING MISSION (RINGING) ---------------
+  if (incomingMission && !activeMission) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'white', padding: '20px', textAlign: 'center' }}>
+         <div style={{ width: '120px', height: '120px', background: '#ef4444', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '50px', marginBottom: '30px' }}>🚨</div>
+         <h1 style={{ color: '#ef4444', margin: 0 }}>🚨 SOS ฉุกเฉิน! (ชิงเคส)</h1>
+         <p style={{ fontSize: '18px', color: '#94a3b8' }}>ใครกดก่อนได้เคสนี้ไป (รัศมี 50km)</p>
+         
+         <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '15px', padding: '20px', width: '100%', maxWidth: '400px', margin: '30px 0', textAlign: 'left' }}>
+            <h3 style={{ margin: '0 0 10px 0', color: '#f8fafc' }}>รายละเอียด:</h3>
+            <p style={{ margin: 0, color: '#94a3b8', fontSize: '18px' }}>{incomingMission.details || 'SOS ขอความช่วยเหลือด่วน ผ่านแอป'}</p>
+         </div>
+         
+         <div style={{ display: 'flex', gap: '20px', width: '100%', maxWidth: '400px' }}>
+            <button onClick={async () => {
+                try {
+                   await axios.post(`http://127.0.0.1:3000/api/incidents/${incomingMission.incident_id}/accept`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+                   const missionData = { id: incomingMission.incident_id, latitude: incomingMission.latitude, longitude: incomingMission.longitude, details: incomingMission.details, citizen_phone: incomingMission.citizen_phone };
+                   setActiveMission(missionData);
+                   setIncomingMission(null);
+                   toast.success("✅ รับงานเรียบร้อย นำทางทันที!");
+                   socket.emit('join_incident_room', incomingMission.incident_id);
+                } catch(e) {
+                   toast.error('❌ ไม่สามารถรับงานได้: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์ขัดข้อง'));
+                   setIncomingMission(null);
+                }
+            }} style={{ flex: 2, background: '#10b981', color: 'white', padding: '20px', fontSize: '24px', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>รับงาน (Accept)</button>
+            
+            <button onClick={async () => {
+                setIncomingMission(null); 
+                await axios.post(`http://127.0.0.1:3000/api/incidents/${incomingMission.incident_id}/reject`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+            }} style={{ flex: 1, background: 'transparent', color: '#ef4444', padding: '20px', fontSize: '18px', border: '2px solid #ef4444', borderRadius: '12px', cursor: 'pointer' }}>ข้ามเคสนี้</button>
+         </div>
+         <p style={{ marginTop: '30px', color: '#ef4444', fontWeight: 'bold' }}>⏳ หากถูกแย่งเคสไปแล้ว หน้านี้จะอัปเดตและดับไปเอง</p>
+      </div>
+    );
+  }
 
   // --------------- RENDER ACTIVE MISSION ---------------
   if (activeMission) {
@@ -148,6 +207,7 @@ function CommandCenter({ user, onLogout }) {
                 <div key={i} style={{ marginBottom: '10px', textAlign: m.sender === 'Staff' ? 'right' : 'left' }}>
                   <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: m.sender === 'Staff' ? '#3b82f6' : '#ef4444', color: '#fff' }}>
                     {m.message}
+                    {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '5px' }} onClick={()=>window.open(m.image)}/></>}
                   </span>
                 </div>
               ))}

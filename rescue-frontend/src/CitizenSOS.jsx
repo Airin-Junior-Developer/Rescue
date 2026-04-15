@@ -31,6 +31,9 @@ function CitizenSOS() {
   const [rescuerLoc, setRescuerLoc] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchingIncidentId, setSearchingIncidentId] = useState(null);
+  const [routeInfo, setRouteInfo] = useState(null); // ETA
   const mapRef = useRef(null);
 
   useEffect(() => {
@@ -39,6 +42,23 @@ function CitizenSOS() {
         setLat(pos.coords.latitude.toString());
         setLng(pos.coords.longitude.toString());
       });
+    }
+
+    // Persist Mission on Refresh
+    const saved = localStorage.getItem('activeCitizenIncident');
+    if (saved) {
+       const incident = JSON.parse(saved);
+       axios.get(`http://127.0.0.1:3000/api/incidents/status/${incident.id}`)
+          .then(res => {
+              if (res.data.status === 'Resolved' || res.data.status === 'Completed') {
+                  localStorage.removeItem('activeCitizenIncident');
+              } else {
+                  // Merge API missing data like driver_phone into the object if needed
+                  const hydratedIncident = { ...incident, driver_name: res.data.driver_name || incident.driver_name, driver_phone: res.data.driver_phone || incident.driver_phone };
+                  setActiveIncident(hydratedIncident);
+                  socket.emit('join_incident_room', incident.id);
+              }
+          }).catch(() => localStorage.removeItem('activeCitizenIncident'));
     }
 
     // Socket listeners for Tracking Mode
@@ -50,9 +70,33 @@ function CitizenSOS() {
       setChatMessages(prev => [...prev, msg]);
     });
 
+    socket.on('mission_completed', () => {
+        toast.success("🚑 กู้ภัยความช่วยเหลือเสร็จสิ้นแล้ว! ขอบคุณที่ใช้บริการครับ");
+        setActiveIncident(null);
+        setRescuerLoc(null);
+        setChatMessages([]);
+        localStorage.removeItem('activeCitizenIncident');
+    });
+
+    socket.on('driver_assigned', (data) => {
+        toast.success("✅ กู้ภัยกดรับงานแล้ว! ติดตามรถได้เลย");
+        setIsSearching(false);
+        const incident = { id: data.incident_id, assigned_user_id: data.driver_id, driver_name: data.driver_name, driver_phone: data.driver_phone };
+        setActiveIncident(incident);
+        localStorage.setItem('activeCitizenIncident', JSON.stringify(incident));
+    });
+
+    socket.on('no_drivers', () => {
+        toast.error("❌ ไม่สามารถหารถกู้ภัยที่ว่างในขณะนี้ได้ โปรดโทร 1669");
+        setIsSearching(false);
+    });
+
     return () => {
       socket.off('vehicle_location_updated');
       socket.off('new_chat_message');
+      socket.off('mission_completed');
+      socket.off('driver_assigned');
+      socket.off('no_drivers');
     };
   }, []);
 
@@ -87,20 +131,19 @@ function CitizenSOS() {
 
   const submitSOS = async () => {
     try {
-      toast.info('🚑 Searching for nearest rescue vehicle...');
+      toast.info('🔍 กำลังค้นหารถกู้ภัยที่ใกล้ที่สุดให้คุณ...');
+      setIsSearching(true);
       const res = await axios.post('http://127.0.0.1:3000/api/incidents', {
         details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone
       });
-
-      toast.success('✅ Rescue Vehicle Found and Dispatched!');
-      const incident = { id: res.data.incident_id, assigned_user_id: res.data.assigned_user_id };
-      setActiveIncident(incident);
-
-      // Join the private socket room
-      socket.emit('join_incident_room', incident.id);
+      setSearchingIncidentId(res.data.incident_id);
+      
+      // Join the private socket room to wait for driver_assigned matching event!
+      socket.emit('join_incident_room', res.data.incident_id);
 
     } catch (e) {
-      toast.error(e.response?.data?.error || '❌ Server Error or No Units Available.');
+      toast.error('❌ ค้นหาล้มเหลว: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์มีปัญหา'));
+      setIsSearching(false);
     }
   };
 
@@ -115,13 +158,31 @@ function CitizenSOS() {
     setChatInput('');
   };
 
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        socket.emit('send_chat_message', {
+             incident_id: activeIncident.id, 
+             sender: 'Citizen', 
+             message: '📸 ส่งรูปภาพประกอบ', 
+             image: event.target.result
+        });
+    };
+    reader.readAsDataURL(file);
+  };
+
   // --------------- UI RENDERS ---------------
   if (activeIncident) {
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif', background: '#0f172a' }}>
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.1)', color: '#fff', textAlign: 'center' }}>
-          <h2>🚨 กู้ภัยกำลังเดินทางมาหาคุณ!</h2>
-          <p>Rescue is En-Route (Incident #{activeIncident.id})</p>
+          <h2 style={{ margin: '0 0 5px 0' }}>🚨 {activeIncident.driver_name ? `กู้ภัยคุณ ${activeIncident.driver_name} กำลังเดินทางมา!` : 'กู้ภัยกำลังเดินทางมาหาคุณ!'}</h2>
+          <p style={{ margin: '5px 0', color: '#10b981', fontWeight: 'bold' }}>
+              {routeInfo ? `ระยะทาง ${(routeInfo.totalDistance/1000).toFixed(1)} กม. | คาดว่าจะถึงใน ${Math.ceil(routeInfo.totalTime/60)} นาที` : 'กำลังคำนวณระยะทาง...'}
+          </p>
+          {activeIncident.driver_phone && <p style={{ margin: 0, fontSize: '14px', color: '#94a3b8' }}>เบอร์โทร: {activeIncident.driver_phone}</p>}
         </div>
         
         <div style={{ flex: 1, position: 'relative' }}>
@@ -140,14 +201,14 @@ function CitizenSOS() {
                </Marker>
              )}
 
-             <RoutingMachine citizen={[parseFloat(lat), parseFloat(lng)]} rescuer={rescuerLoc} />
+             <RoutingMachine citizen={[parseFloat(lat), parseFloat(lng)]} rescuer={rescuerLoc} setRouteInfo={setRouteInfo} />
           </MapContainer>
         </div>
 
         {/* Chat / Call Drawer */}
         <div className="glass-panel" style={{ height: '40vh', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
            <div style={{ padding: '15px', display: 'flex', justifyContent: 'space-around', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-              <button disabled className="btn" style={{ flex: 1, background: '#3b82f6', color: '#fff', marginRight: '10px' }}>📞 Call Rescuer</button>
+              <a href={activeIncident.driver_phone ? `tel:${activeIncident.driver_phone}` : '#'} className="btn" style={{ flex: 1, background: '#3b82f6', color: '#fff', marginRight: '10px', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📞 โทรหากู้ภัย</a>
               <div style={{ flex: 1, color: '#94a3b8', textAlign: 'center', lineHeight: '40px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
                 Chat 💬
               </div>
@@ -157,12 +218,16 @@ function CitizenSOS() {
                 <div key={i} style={{ marginBottom: '10px', textAlign: m.sender === 'Citizen' ? 'right' : 'left' }}>
                   <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: m.sender === 'Citizen' ? '#ef4444' : '#3b82f6', color: '#fff' }}>
                     {m.message}
+                    {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', marginTop: '5px' }}/></>}
                   </span>
                 </div>
               ))}
            </div>
-           <div style={{ padding: '10px 15px', display: 'flex', gap: '10px' }}>
-              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="พิมพ์ข้อความถึงกู้ภัย..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: 'none', outline: 'none' }} />
+           <div style={{ padding: '10px 15px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <label style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  📷<input type="file" accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
+              </label>
+              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="พิมพ์ข้อความ..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: 'none', outline: 'none' }} />
               <button onClick={sendMessage} style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '20px', padding: '0 20px', cursor: 'pointer' }}>ส่ง</button>
            </div>
         </div>
@@ -217,11 +282,21 @@ function CitizenSOS() {
           Staff Login (Driver Companion)
         </Link>
       </div>
+
+      {isSearching && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.95)', color: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+            <div style={{ width: '80px', height: '80px', background: '#10b981', borderRadius: '50%', marginBottom: '20px', boxShadow: '0 0 30px #10b981' }}></div>
+            <h2 style={{ color: '#10b981', textAlign: 'center' }}>กำลังค้นหากู้ภัยที่ใกล้ที่สุด...</h2>
+            <p style={{ color: '#94a3b8', textAlign: 'center', margin: '10px 20px' }}>โปรดรอสักครู่ ระบบกำลังจับคู่คุณกับรถกู้ภัยที่อยู่ใกล้และพร้อมที่สุด</p>
+            {searchingIncidentId && <p style={{ fontSize: '14px', color: '#475569' }}>(Tracking ID: #{searchingIncidentId})</p>}
+        </div>
+      )}
+
     </div>
   );
 }
 
-function RoutingMachine({ citizen, rescuer }) {
+function RoutingMachine({ citizen, rescuer, setRouteInfo }) {
   const map = useMap();
   const routingControlRef = useRef(null);
 
@@ -237,13 +312,19 @@ function RoutingMachine({ citizen, rescuer }) {
         lineOptions: { styles: [{ color: '#10b981', weight: 6, opacity: 0.9 }] },
         createMarker: () => null, show: false, addWaypoints: false,
       }).addTo(map);
+
+      routingControlRef.current.on('routesfound', function(e) {
+          if(e.routes && e.routes[0]) {
+             setRouteInfo(e.routes[0].summary);
+          }
+      });
     } else {
       routingControlRef.current.setWaypoints([
         L.latLng(rescuer.lat, rescuer.lng),
         L.latLng(citizen[0], citizen[1])
       ]);
     }
-  }, [citizen[0], citizen[1], rescuer?.lat, rescuer?.lng, map]);
+  }, [citizen[0], citizen[1], rescuer?.lat, rescuer?.lng, map, setRouteInfo]);
 
   useEffect(() => {
     return () => { if (routingControlRef.current) map.removeControl(routingControlRef.current); };
