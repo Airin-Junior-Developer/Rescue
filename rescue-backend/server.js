@@ -59,6 +59,9 @@ pool.query('ALTER TABLE incidents ADD COLUMN parent_incident_id INT NULL').catch
 // Auto-migrate citizen phone for SOS requests
 pool.query('ALTER TABLE incidents ADD COLUMN citizen_phone VARCHAR(20) NULL').catch(()=>{});
 
+// Auto-migrate cancel reason
+pool.query('ALTER TABLE incidents ADD COLUMN cancel_reason VARCHAR(255) NULL').catch(()=>{});
+
 // Auto-migrate citizens table for LINE login
 pool.query(`
     CREATE TABLE IF NOT EXISTS citizens (
@@ -77,8 +80,18 @@ redisClient.connect().then(() => console.log('Connected to Redis'));
 // Global Memory for Dispatch Queues (Handling Timeouts)
 const dispatchState = {};
 
-function broadcastOffer(incident_id, drivers, payload) {
+async function broadcastOffer(incident_id, drivers, payload) {
     if (drivers.length === 0) return;
+    
+    // Add prank count if citizen_phone exists
+    let prank_count = 0;
+    if (payload.citizen_phone) {
+        try {
+            const [rows] = await pool.query("SELECT COUNT(*) as count FROM incidents WHERE citizen_phone = ? AND cancel_reason = 'ก่อกวน / แจ้งเล่น'", [payload.citizen_phone]);
+            prank_count = rows[0].count;
+        } catch(e) {}
+    }
+    const finalPayload = { incident_id, prank_count, ...payload };
     
     // Set a 30s lifespan for this blasted offer
     dispatchState[incident_id] = {
@@ -92,7 +105,7 @@ function broadcastOffer(incident_id, drivers, payload) {
     // Blast to ALL eligible drivers SIMULTANEOUSLY!
     console.log(`[SYS] Broadcasting Incident ${incident_id} to ${drivers.length} online drivers!`);
     drivers.forEach(targetDriverId => {
-        io.to(`driver_${targetDriverId}`).emit('offer_mission', { incident_id, ...payload });
+        io.to(`driver_${targetDriverId}`).emit('offer_mission', finalPayload);
     });
 }
 
@@ -159,6 +172,16 @@ app.post('/api/citizen/auth', async (req, res) => {
             await pool.query('INSERT INTO citizens (line_uid, display_name) VALUES (?, ?)', [line_uid, display_name]);
             res.json({ message: 'New citizen created', phone: '' });
         }
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Citizen Register Phone (Standalone API)
+app.post('/api/citizen/register-phone', async (req, res) => {
+    try {
+        const { line_uid, phone } = req.body;
+        if (!line_uid || !phone) return res.status(400).json({ error: 'Missing data' });
+        await pool.query('UPDATE citizens SET phone = ? WHERE line_uid = ?', [phone, line_uid]);
+        res.json({ message: 'Phone updated successfully' });
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -317,6 +340,7 @@ app.get('/api/admin/system-status', verifyToken, async (req, res) => {
     try {
         const [incidents] = await pool.query('SELECT * FROM incidents WHERE status IN ("Pending", "Accepted")');
         const [history] = await pool.query('SELECT * FROM incidents WHERE status IN ("Resolved", "Failed") ORDER BY id DESC LIMIT 500');
+        const [prank_stats] = await pool.query("SELECT citizen_phone, COUNT(*) as count FROM incidents WHERE cancel_reason = 'ก่อกวน / แจ้งเล่น' GROUP BY citizen_phone ORDER BY count DESC LIMIT 50");
         
         let totalResponseTimeMs = 0;
         let respondedCount = 0;
@@ -334,7 +358,7 @@ app.get('/api/admin/system-status', verifyToken, async (req, res) => {
             const statStr = await redisClient.get(k);
             if (statStr) rescuers.push({ id: k.split(':')[1], ...JSON.parse(statStr) });
         }
-        res.json({ incidents, rescuers, history, avgResponseTimeSec });
+        res.json({ incidents, rescuers, history, avgResponseTimeSec, prank_stats });
     } catch(e) { res.status(500).json({ error: e.message }) }
 });
 
@@ -385,6 +409,8 @@ app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
         }
         
         const incident_id = req.params.id;
+        const cancel_reason = req.body.reason || null;
+
         console.log("[DEBUG] Clearing dispatchState...");
         if (dispatchState[incident_id]) {
             clearTimeout(dispatchState[incident_id].timer);
@@ -406,7 +432,7 @@ app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
         }
         
         console.log("[DEBUG] Updating DB status to Resolved...");
-        await pool.query('UPDATE incidents SET status = "Resolved" WHERE id = ? OR parent_incident_id = ?', [incident_id, incident_id]);
+        await pool.query('UPDATE incidents SET status = "Resolved", cancel_reason = ? WHERE id = ? OR parent_incident_id = ?', [cancel_reason, incident_id, incident_id]);
         
         console.log("[DEBUG] Emitting sockets...");
         io.to(`incident_room_${incident_id}`).emit('no_drivers'); // Signal Citizen to stop waiting

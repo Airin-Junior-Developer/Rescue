@@ -15,12 +15,18 @@ function AdminDashboard({ user, onLogout }) {
   const [avgTime, setAvgTime] = useState(0);
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [lineBroadcastMsg, setLineBroadcastMsg] = useState('');
+  const [prankStats, setPrankStats] = useState([]);
 
   // Management Modal State
   const [showManageModal, setShowManageModal] = useState(false);
   const [foundations, setFoundations] = useState([]);
   const [newFoundation, setNewFoundation] = useState({ name: '', contact_info: '' });
   const [newRescuer, setNewRescuer] = useState({ username: '', password: '', phone: '', foundation_id: '' });
+
+  // Cancel Modal State
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelIncidentId, setCancelIncidentId] = useState(null);
+  const [cancelReason, setCancelReason] = useState('สถานการณ์ปลอดภัยแล้ว');
 
   const fetchFoundations = async () => {
      try {
@@ -68,16 +74,24 @@ function AdminDashboard({ user, onLogout }) {
       setRescuers(res.data.rescuers || []);
       setHistory(res.data.history || []);
       setAvgTime(res.data.avgResponseTimeSec || 0);
+      setPrankStats(res.data.prank_stats || []);
     } catch(e) { }
   };
 
-  const cancelIncident = async (id) => {
-     const isConfirmed = window.confirm(`⚠️ ยืนยันการบังคับยกเลิก Incident #${id} หรือไม่?\n\nการกระทำนี้จะถือว่าภารกิจสิ้นสุดทันที รถกู้ภัยที่รับงานอยู่จะถูกปลดแอกให้ไปรับงานอื่นต่อได้ทันที`);
-     if (!isConfirmed) return;
+  const openCancelModal = (id) => {
+      setCancelIncidentId(id);
+      setCancelReason('สถานการณ์ปลอดภัยแล้ว');
+      setShowCancelModal(true);
+  };
+
+  const confirmCancelIncident = async () => {
+     if (!cancelIncidentId) return;
 
      try {
-         await axios.post(`http://127.0.0.1:3000/api/admin/incidents/${id}/cancel`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
-         toast.success("ยกเลิกเหตุการณ์และปลดแอกคนขับเรียบร้อย");
+         await axios.post(`http://127.0.0.1:3000/api/admin/incidents/${cancelIncidentId}/cancel`, { reason: cancelReason }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         toast.success("ยกเลิกเหตุการณ์และบันทึกเหตุผลเรียบร้อย");
+         setShowCancelModal(false);
+         setCancelIncidentId(null);
          fetchStatus();
      } catch (e) {
          let errMsg = "SERVER CRASH";
@@ -190,7 +204,7 @@ function AdminDashboard({ user, onLogout }) {
                    <p style={{ margin: '5px 0', color: '#e2e8f0' }}>รถที่รับผิดชอบ: <strong style={{ color: '#10b981' }}>{inc.assigned_user_id ? `Unit ${inc.assigned_user_id}` : 'กำลังค้นหา...'}</strong></p>
                    <p style={{ margin: '5px 0', fontSize: '12px', color: '#94a3b8' }}>รายละเอียด: {inc.details}</p>
                    
-                   <button onClick={() => cancelIncident(inc.id)} style={{ marginTop: '15px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', padding: '10px', borderRadius: '5px', cursor: 'pointer', width: '100%', fontWeight: 'bold' }}>
+                   <button onClick={() => openCancelModal(inc.id)} style={{ marginTop: '15px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', padding: '10px', borderRadius: '5px', cursor: 'pointer', width: '100%', fontWeight: 'bold' }}>
                        บังคับยกเลิกเหตุนี้ (Force Cancel)
                    </button>
                </div>
@@ -259,6 +273,28 @@ function AdminDashboard({ user, onLogout }) {
                         </tbody>
                      </table>
                  </div>
+
+                 {/* PRANK STATS */}
+                 <h4 style={{ color: '#ef4444', marginTop: '20px', marginBottom: '10px' }}>⚠️ สถิติเบอร์โทรก่อกวน</h4>
+                 <div style={{ maxHeight: '150px', overflowY: 'auto', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                     <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+                        <thead style={{ position: 'sticky', top: 0, background: '#1e293b', zIndex: 1 }}>
+                           <tr>
+                              <th style={{ color:'#94a3b8', textAlign:'left', padding: '10px' }}>เบอร์โทรศัพท์</th>
+                              <th style={{ color:'#94a3b8', textAlign:'right', padding: '10px' }}>จำนวนครั้งที่ก่อกวน</th>
+                           </tr>
+                        </thead>
+                        <tbody>
+                            {prankStats.length === 0 ? <tr><td colSpan="2" style={{ textAlign: 'center', padding: '15px', color: '#64748b' }}>ไม่มีประวัติการก่อกวน</td></tr> : null}
+                            {prankStats.map(ps => (
+                                <tr key={ps.citizen_phone} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <td style={{ padding: '10px', color: '#e2e8f0' }}>{ps.citizen_phone || 'Unknown'}</td>
+                                    <td style={{ padding: '10px', color: '#ef4444', textAlign: 'right', fontWeight: 'bold' }}>{ps.count} ครั้ง</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                     </table>
+                 </div>
             </div>
 
             <h2 style={{ color: '#3b82f6', borderBottom: '1px solid #334155', paddingBottom: '10px', marginTop: '40px' }}>🚑 รถกู้ภัยในระบบ (Units Online)</h2>
@@ -307,6 +343,26 @@ function AdminDashboard({ user, onLogout }) {
                         <input value={newRescuer.phone} onChange={e=>setNewRescuer({...newRescuer, phone: e.target.value})} placeholder="เบอร์โทรศัพท์รถกู้ภัยคันนี้" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
                         <button type="submit" style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ สร้างบัญชีกู้ภัย</button>
                     </form>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* CANCEL MODAL */}
+      {showCancelModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ background: '#1e293b', padding: '30px', borderRadius: '12px', width: '400px', maxWidth: '90%', color: 'white', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+                <h3 style={{ margin: '0 0 15px 0', color: '#ef4444' }}>⚠️ ยืนยันการบังคับยกเลิก</h3>
+                <p style={{ color: '#94a3b8', marginBottom: '20px' }}>โปรดระบุเหตุผลในการยกเลิกเหตุการณ์ #{cancelIncidentId}</p>
+                <select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '20px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}>
+                    <option value="สถานการณ์ปลอดภัยแล้ว">สถานการณ์ปลอดภัยแล้ว</option>
+                    <option value="ก่อกวน / แจ้งเล่น">ก่อกวน / แจ้งเล่น</option>
+                    <option value="มีหน่วยอื่นรับไปแล้ว">มีหน่วยอื่นรับไปแล้ว</option>
+                    <option value="ข้อมูลผิดพลาด">ข้อมูลผิดพลาด</option>
+                </select>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button onClick={() => setShowCancelModal(false)} style={{ background: 'transparent', color: '#94a3b8', border: '1px solid #475569', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}>ปิด</button>
+                    <button onClick={confirmCancelIncident} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>ยืนยันการยกเลิก</button>
                 </div>
             </div>
         </div>

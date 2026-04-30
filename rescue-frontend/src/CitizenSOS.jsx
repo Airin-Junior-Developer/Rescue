@@ -22,6 +22,10 @@ function CitizenSOS() {
   const [lat, setLat] = useState('13.7563');
   const [lng, setLng] = useState('100.5018');
 
+  // Registration Modal State
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerPhoneInput, setRegisterPhoneInput] = useState('');
+
   // SOS Hold Logic
   const [isHolding, setIsHolding] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
@@ -58,7 +62,8 @@ function CitizenSOS() {
                   setCitizenPhone(res.data.phone);
                   toast.success(`สวัสดีคุณ ${profile.displayName} ระบบดึงเบอร์โทรของคุณมาให้อัตโนมัติแล้ว!`);
                 } else {
-                  toast.info(`สวัสดีคุณ ${profile.displayName} กรุณากรอกเบอร์โทรสำหรับการใช้งานครั้งแรกครับ`);
+                  // If no phone is registered, enforce registration
+                  setShowRegister(true);
                 }
               }).catch(e => console.error(e));
           });
@@ -129,6 +134,7 @@ function CitizenSOS() {
   const startHold = () => {
     if (!citizenPhone.trim()) {
       toast.warning('กรุณากรอกเบอร์โทรศัพท์ก่อนกดแจ้งเหตุ (Phone Number Required)');
+      setShowRegister(true);
       return;
     }
     setIsHolding(true);
@@ -145,6 +151,22 @@ function CitizenSOS() {
       stopHold();
       submitSOS();
     }, 5000);
+  };
+
+  const handleRegisterPhone = async (e) => {
+      e.preventDefault();
+      if (!registerPhoneInput || registerPhoneInput.length < 9) {
+          toast.error('กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (อย่างน้อย 9 หลัก)');
+          return;
+      }
+      try {
+          await axios.post('http://127.0.0.1:3000/api/citizen/register-phone', { line_uid: lineUid, phone: registerPhoneInput });
+          setCitizenPhone(registerPhoneInput);
+          setShowRegister(false);
+          toast.success('ลงทะเบียนเบอร์โทรสำเร็จ! คุณสามารถกดแจ้งเหตุฉุกเฉินได้ทันที');
+      } catch (e) {
+          toast.error('การลงทะเบียนผิดพลาด: ' + e.message);
+      }
   };
 
   const stopHold = () => {
@@ -315,6 +337,30 @@ function CitizenSOS() {
             <p style={{ color: '#94a3b8', textAlign: 'center', margin: '10px 20px' }}>โปรดรอสักครู่ ระบบกำลังจับคู่คุณกับรถกู้ภัยที่อยู่ใกล้และพร้อมที่สุด</p>
             {searchingIncidentId && <p style={{ fontSize: '14px', color: '#475569' }}>(Tracking ID: #{searchingIncidentId})</p>}
         </div>
+      )}
+
+      {/* REGISTRATION MODAL */}
+      {showRegister && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.98)', color: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+              <div className="glass-panel animate-slide-up" style={{ width: '90%', maxWidth: '400px', padding: '30px', borderRadius: '15px', textAlign: 'center' }}>
+                  <h2 style={{ color: '#10b981', margin: '0 0 15px 0' }}>📱 ลงทะเบียนครั้งแรก</h2>
+                  <p style={{ color: '#94a3b8', marginBottom: '20px', fontSize: '14px' }}>เพื่อความรวดเร็วในการติดต่อกลับยามฉุกเฉิน กรุณาระบุเบอร์โทรศัพท์ของคุณ (ระบบจะจำไว้สำหรับการใช้งานครั้งต่อไป)</p>
+                  
+                  <form onSubmit={handleRegisterPhone}>
+                      <input 
+                          type="tel"
+                          value={registerPhoneInput}
+                          onChange={(e) => setRegisterPhoneInput(e.target.value)}
+                          placeholder="เบอร์โทรศัพท์ (เช่น 0812345678)"
+                          style={{ width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: '18px', textAlign: 'center', marginBottom: '20px' }}
+                          required
+                      />
+                      <button type="submit" style={{ width: '100%', background: '#10b981', color: 'white', border: 'none', padding: '15px', borderRadius: '8px', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          บันทึกข้อมูลและเข้าสู่ระบบ
+                      </button>
+                  </form>
+              </div>
+          </div>
       )}
 
     </div>

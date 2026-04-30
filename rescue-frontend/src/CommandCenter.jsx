@@ -141,6 +141,12 @@ function CommandCenter({ user, onLogout }) {
          <h1 style={{ color: '#ef4444', margin: 0 }}>🚨 SOS ฉุกเฉิน! (ชิงเคส)</h1>
          <p style={{ fontSize: '18px', color: '#94a3b8' }}>ใครกดก่อนได้เคสนี้ไป (รัศมี 50km)</p>
          
+         {incomingMission.prank_count > 0 && (
+            <div style={{ marginTop: '20px', background: 'rgba(239, 68, 68, 0.2)', border: '2px solid #ef4444', color: '#fca5a5', padding: '15px', borderRadius: '10px', fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span>⚠️</span> ระวัง: เบอร์โทรนี้มีประวัติการก่อกวน {incomingMission.prank_count} ครั้ง
+            </div>
+         )}
+
          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '15px', padding: '20px', width: '100%', maxWidth: '400px', margin: '30px 0', textAlign: 'left' }}>
             <h3 style={{ margin: '0 0 10px 0', color: '#f8fafc' }}>รายละเอียด:</h3>
             <p style={{ margin: 0, color: '#94a3b8', fontSize: '18px' }}>{incomingMission.details || 'SOS ขอความช่วยเหลือด่วน ผ่านแอป'}</p>
