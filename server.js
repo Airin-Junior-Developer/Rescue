@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 const http = require('http');
@@ -8,6 +9,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 require('dotenv').config();
 
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -16,6 +18,25 @@ app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'rescue_super_secret_key';
+
+// Helper: Send LINE Push Message to a specific user
+async function sendLinePush(lineUid, message) {
+    if (!lineUid) return;
+    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!token || token === 'YOUR_CHANNEL_ACCESS_TOKEN') return;
+    try {
+        await axios.post('https://api.line.me/v2/bot/message/push', {
+            to: lineUid,
+            messages: [{ type: 'text', text: message }]
+        }, {
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+        });
+        console.log(`[LINE] Push sent to ${lineUid}`);
+    } catch(e) {
+        console.error('[LINE] Push failed:', e.response?.data || e.message);
+    }
+}
+
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -34,6 +55,20 @@ pool.query('UPDATE users SET phone = "081-669-1234" WHERE role = "Rescue"').catc
 
 // Auto-migrate parent incident link for Backup feature
 pool.query('ALTER TABLE incidents ADD COLUMN parent_incident_id INT NULL').catch(()=>{});
+
+// Auto-migrate citizen phone for SOS requests
+pool.query('ALTER TABLE incidents ADD COLUMN citizen_phone VARCHAR(20) NULL').catch(()=>{});
+
+// Auto-migrate citizens table for LINE login
+pool.query(`
+    CREATE TABLE IF NOT EXISTS citizens (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        line_uid VARCHAR(100) NOT NULL UNIQUE,
+        display_name VARCHAR(255) NULL,
+        phone VARCHAR(20) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+`).catch(()=>{});
 
 const redisClient = redis.createClient({ url: 'redis://127.0.0.1:6379' });
 redisClient.on('error', (err) => console.log('Redis error:', err));
@@ -110,13 +145,35 @@ const verifyToken = (req, res, next) => {
     } catch (err) { res.status(401).json({ error: 'Invalid Token' }); }
 };
 
+// Citizen LINE Auth
+app.post('/api/citizen/auth', async (req, res) => {
+    try {
+        const { line_uid, display_name } = req.body;
+        if (!line_uid) return res.status(400).json({ error: 'line_uid required' });
+
+        const [rows] = await pool.query('SELECT phone FROM citizens WHERE line_uid = ?', [line_uid]);
+        if (rows.length > 0) {
+            await pool.query('UPDATE citizens SET display_name = ? WHERE line_uid = ?', [display_name, line_uid]);
+            res.json({ message: 'Authenticated', phone: rows[0].phone || '' });
+        } else {
+            await pool.query('INSERT INTO citizens (line_uid, display_name) VALUES (?, ?)', [line_uid, display_name]);
+            res.json({ message: 'New citizen created', phone: '' });
+        }
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // 2. Incident API (Auto-Dispatch GRAB-Style)
 app.post('/api/incidents', async (req, res) => {
     try {
-        let { details, latitude, longitude, citizen_phone } = req.body;
+        let { details, latitude, longitude, citizen_phone, line_uid } = req.body;
         latitude = parseFloat(latitude); longitude = parseFloat(longitude);
 
         if (isNaN(latitude) || isNaN(longitude)) return res.status(400).json({ error: 'Invalid GPS' });
+
+        // If line_uid is provided, update their phone number in the citizens table
+        if (line_uid && citizen_phone) {
+            await pool.query('UPDATE citizens SET phone = ? WHERE line_uid = ?', [citizen_phone, line_uid]);
+        }
 
         // Phase 1: Retrieve all online/available drivers within 50km using Redis GEOSPATIAL
         const nearbyDriverIds = await redisClient.sendCommand([
@@ -187,11 +244,25 @@ app.post('/api/incidents/:id/accept', verifyToken, async (req, res) => {
         const [driverRows] = await pool.query('SELECT username, phone FROM users WHERE id = ?', [driver_id]);
         const rescuerInfo = driverRows[0] || {};
         
-        const [incRows] = await pool.query('SELECT parent_incident_id FROM incidents WHERE id = ?', [incident_id]);
+        const [incRows] = await pool.query('SELECT parent_incident_id, citizen_phone FROM incidents WHERE id = ?', [incident_id]);
         const parent_id = incRows.length > 0 && incRows[0].parent_incident_id ? incRows[0].parent_incident_id : incident_id;
+        const citizen_phone = incRows.length > 0 ? incRows[0].citizen_phone : null;
 
-        // Notify Citizen (and primary driver)
+        // Notify Citizen via In-App socket
         io.to(`incident_room_${parent_id}`).emit('driver_assigned', { incident_id, driver_id, driver_name: rescuerInfo.username, driver_phone: rescuerInfo.phone });
+
+        // Notify Citizen via LINE Push (if they have LINE account)
+        if (citizen_phone) {
+            const [citizenRows] = await pool.query('SELECT line_uid FROM citizens WHERE phone = ?', [citizen_phone]);
+            if (citizenRows.length > 0 && citizenRows[0].line_uid) {
+                const msg = `✅ รถกู้ภัยกำลังมาหาคุณแล้ว!\n\n` +
+                    `🚑 หน่วย: ${rescuerInfo.username || 'ทีมกู้ภัย'}\n` +
+                    `📞 เบอร์ติดต่อ: ${rescuerInfo.phone || '-'}\n\n` +
+                    `กรุณารอที่จุดเกิดเหตุ ทีมกำลังมุ่งหน้ามาหาคุณโดยตรงครับ`;
+                sendLinePush(citizenRows[0].line_uid, msg);
+            }
+        }
+
         res.json({ message: 'Mission Accepted Successfully' });
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -274,6 +345,37 @@ app.post('/api/admin/broadcast', verifyToken, async (req, res) => {
     res.json({ message: 'Broadcast Sent' });
 });
 
+// Admin LINE OA Broadcast (General News)
+app.post('/api/admin/line-broadcast', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { message } = req.body;
+        if (!message) return res.status(400).json({ error: 'Message is required' });
+        
+        const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+        if (!token || token === 'YOUR_CHANNEL_ACCESS_TOKEN') {
+            return res.status(500).json({ error: 'ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN ใน .env' });
+        }
+
+        // Call LINE Messaging API directly
+        const lineRes = await axios.post('https://api.line.me/v2/bot/message/broadcast', {
+            messages: [{ type: 'text', text: message }]
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        console.log("LINE Broadcast success:", lineRes.status);
+        res.json({ message: 'LINE Broadcast Sent' });
+    } catch(e) { 
+        const errDetail = e.response?.data || e.message;
+        console.error("LINE Broadcast Error:", JSON.stringify(errDetail));
+        res.status(500).json({ error: 'ส่ง LINE ไม่สำเร็จ: ' + JSON.stringify(errDetail) }); 
+    }
+});
+
 // Admin Manual Force Cancel
 app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
     try {
@@ -317,6 +419,44 @@ app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
     }
 });
 
+// Admin Add Foundation
+app.post('/api/admin/foundations', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { name, contact_info } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name is required' });
+        const [result] = await pool.query('INSERT INTO foundations (name, contact_info) VALUES (?, ?)', [name, contact_info || null]);
+        res.status(201).json({ message: 'Foundation created', id: result.insertId });
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Admin Get Foundations
+app.get('/api/admin/foundations', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const [rows] = await pool.query('SELECT * FROM foundations');
+        res.json(rows);
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Admin Add Rescuer
+app.post('/api/admin/rescuers', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { username, password, foundation_id, phone } = req.body;
+        if (!username || !password || !foundation_id) return res.status(400).json({ error: 'Missing required fields' });
+        
+        const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [username]);
+        if (existing.length > 0) return res.status(400).json({ error: 'Username already exists' });
+        
+        const hashed = await bcrypt.hash(password, 10);
+        const [result] = await pool.query('INSERT INTO users (username, password, role, foundation_id, phone) VALUES (?, ?, ?, ?, ?)', 
+            [username, hashed, 'Rescue', foundation_id, phone || null]);
+        
+        res.status(201).json({ message: 'Rescuer created', id: result.insertId });
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
 // Fetch active case for Driver
 app.get('/api/incidents/active', verifyToken, async (req, res) => {
     try {
@@ -342,10 +482,23 @@ app.post('/api/incidents/:id/complete', verifyToken, async (req, res) => {
             }
         }
 
-        const [incRows] = await pool.query('SELECT parent_incident_id FROM incidents WHERE id = ?', [req.params.id]);
+        const [incRows] = await pool.query('SELECT parent_incident_id, citizen_phone FROM incidents WHERE id = ?', [req.params.id]);
         const parent_id = incRows.length > 0 && incRows[0].parent_incident_id ? incRows[0].parent_incident_id : req.params.id;
+        const citizen_phone = incRows.length > 0 ? incRows[0].citizen_phone : null;
 
         io.to(`incident_room_${parent_id}`).emit('mission_completed', { message: 'Mission Cascaded Complete' });
+
+        // Notify Citizen via LINE Push (mission complete)
+        if (citizen_phone) {
+            const [citizenRows] = await pool.query('SELECT line_uid FROM citizens WHERE phone = ?', [citizen_phone]);
+            if (citizenRows.length > 0 && citizenRows[0].line_uid) {
+                const msg = `🏁 ภารกิจเสร็จสิ้นแล้วครับ!\n\n` +
+                    `ทีมกู้ภัยได้ดำเนินการช่วยเหลือเรียบร้อยแล้ว\n` +
+                    `ขอให้คุณปลอดภัยนะครับ 🙏\n\n` +
+                    `หากต้องการความช่วยเหลือเพิ่มเติม กด "แจ้งเหตุ" ได้เลยครับ`;
+                sendLinePush(citizenRows[0].line_uid, msg);
+            }
+        }
 
         res.json({ message: 'Mission Completed' });
     } catch (error) { res.status(500).json({ error: error.message }); }

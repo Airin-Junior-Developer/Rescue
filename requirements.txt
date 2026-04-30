@@ -1,0 +1,49 @@
+ข้อกำหนดสำหรับรันโปรเจกต์ Rescue (Node.js, Express, React/Vue, Docker)
+======================================================
+
+เนื่องจากเป็นเครื่อง Mac ใหม่ นี่คือสิ่งที่คุณต้องติดตั้งเพื่อให้สามารถรันโปรเจกต์ Rescue ได้:
+
+1. Homebrew (เครื่องมือจัดการแพ็กเกจสำหรับ macOS)
+   - เปิดแอป Terminal แล้วรันคำสั่ง:
+     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+2. Node.js และ npm (สำหรับจัดการไลบรารีและรันเซิร์ฟเวอร์ Node.js)
+   - รันคำสั่งใน Terminal:
+     brew install node
+
+3. Docker Desktop (สำคัญมาก! สำหรับจำลอง Database MySQL และ Redis)
+   - รันคำสั่งใน Terminal:
+     brew install --cask docker
+   - หลังจากติดตั้งเสร็จ ให้ไปที่โฟลเดอร์ Applications ในเครื่อง Mac แล้วเปิดโปรแกรม Docker ขึ้นมา (ต้องเปิดทิ้งไว้เพื่อให้ใช้งานฐานข้อมูลได้)
+
+
+ขั้นตอนการเริ่มรันโปรเจกต์ (หลังจากติดตั้ง 1-3 และเปิดโปรแกรม Docker แล้ว)
+------------------------------------------------------
+โปรเจกต์นี้แบ่งออกเป็น 3 ส่วนหลัก (Backend, Frontend, Admin) คุณจะต้องเปิด Terminal 3 หน้าต่าง (หรือ 3 Tabs) เพื่อรันแยกกัน
+
+>> ส่วนที่ 1: รันฐานข้อมูล และ Backend (หน้าต่าง Terminal ที่ 1)
+1. เข้าโฟลเดอร์โปรเจกต์:
+   cd /Users/airin/Desktop/Rescue
+2. เปิดฐานข้อมูล (MySQL และ Redis):
+   docker-compose up -d
+3. ติดตั้งแพ็กเกจ Backend:
+   npm install
+4. เริ่มรัน Backend:
+   node server.js
+   (หรือถ้าต้องการให้รีเฟรชอัตโนมัติตอนแก้โค้ด ให้รัน: npx nodemon server.js)
+
+>> ส่วนที่ 2: รัน Frontend (หน้าต่าง Terminal ที่ 2)
+1. เปิดหน้าต่าง/แท็บ Terminal ใหม่ แล้วเข้าโฟลเดอร์:
+   cd /Users/airin/Desktop/Rescue/rescue-frontend
+2. ติดตั้งแพ็กเกจ:
+   npm install
+3. เริ่มรัน Frontend:
+   npm run dev
+
+>> ส่วนที่ 3: รัน Web Admin (หน้าต่าง Terminal ที่ 3)
+1. เปิดหน้าต่าง/แท็บ Terminal ใหม่ แล้วเข้าโฟลเดอร์:
+   cd /Users/airin/Desktop/Rescue/rescue-web-admin
+2. ติดตั้งแพ็กเกจ:
+   npm install
+3. เริ่มรัน Web Admin:
+   npm run dev

@@ -7,6 +7,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
+import liff from '@line/liff';
 
 const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] };
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
@@ -17,6 +18,7 @@ const socket = io('http://127.0.0.1:3000');
 function CitizenSOS() {
   const [details, setDetails] = useState('');
   const [citizenPhone, setCitizenPhone] = useState('');
+  const [lineUid, setLineUid] = useState(null);
   const [lat, setLat] = useState('13.7563');
   const [lng, setLng] = useState('100.5018');
 
@@ -43,6 +45,29 @@ function CitizenSOS() {
         setLng(pos.coords.longitude.toString());
       });
     }
+
+    // Initialize LINE LIFF
+    liff.init({ liffId: '2009894409-w2sSn3rf' })
+      .then(() => {
+        if (liff.isLoggedIn()) {
+          liff.getProfile().then(profile => {
+            setLineUid(profile.userId);
+            axios.post('http://127.0.0.1:3000/api/citizen/auth', { line_uid: profile.userId, display_name: profile.displayName })
+              .then(res => {
+                if (res.data.phone) {
+                  setCitizenPhone(res.data.phone);
+                  toast.success(`สวัสดีคุณ ${profile.displayName} ระบบดึงเบอร์โทรของคุณมาให้อัตโนมัติแล้ว!`);
+                } else {
+                  toast.info(`สวัสดีคุณ ${profile.displayName} กรุณากรอกเบอร์โทรสำหรับการใช้งานครั้งแรกครับ`);
+                }
+              }).catch(e => console.error(e));
+          });
+        } else {
+          // ถ้าเปิดในบราวเซอร์ปกติ แล้วยังไม่ได้ล็อกอิน ให้เด้งไปหน้าล็อกอินของ LINE
+          liff.login();
+        }
+      })
+      .catch(err => console.error("LIFF Init failed", err));
 
     // Persist Mission on Refresh
     const saved = localStorage.getItem('activeCitizenIncident');
@@ -134,7 +159,7 @@ function CitizenSOS() {
       toast.info('🔍 กำลังค้นหารถกู้ภัยที่ใกล้ที่สุดให้คุณ...');
       setIsSearching(true);
       const res = await axios.post('http://127.0.0.1:3000/api/incidents', {
-        details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone
+        details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone, line_uid: lineUid
       });
       setSearchingIncidentId(res.data.incident_id);
       

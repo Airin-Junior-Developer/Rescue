@@ -14,6 +14,44 @@ function AdminDashboard({ user, onLogout }) {
   const [history, setHistory] = useState([]);
   const [avgTime, setAvgTime] = useState(0);
   const [broadcastMsg, setBroadcastMsg] = useState('');
+  const [lineBroadcastMsg, setLineBroadcastMsg] = useState('');
+
+  // Management Modal State
+  const [showManageModal, setShowManageModal] = useState(false);
+  const [foundations, setFoundations] = useState([]);
+  const [newFoundation, setNewFoundation] = useState({ name: '', contact_info: '' });
+  const [newRescuer, setNewRescuer] = useState({ username: '', password: '', phone: '', foundation_id: '' });
+
+  const fetchFoundations = async () => {
+     try {
+         const res = await axios.get('http://127.0.0.1:3000/api/admin/foundations', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         setFoundations(res.data);
+     } catch (e) { console.error("Failed to fetch foundations", e); }
+  };
+
+  const openManageModal = () => {
+      setShowManageModal(true);
+      fetchFoundations();
+  };
+
+  const handleAddFoundation = async (e) => {
+      e.preventDefault();
+      try {
+          await axios.post('http://127.0.0.1:3000/api/admin/foundations', newFoundation, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          toast.success("เพิ่มมูลนิธิเรียบร้อยแล้ว");
+          setNewFoundation({ name: '', contact_info: '' });
+          fetchFoundations(); // refresh list
+      } catch (e) { toast.error("Fail: " + (e.response?.data?.error || e.message)); }
+  };
+
+  const handleAddRescuer = async (e) => {
+      e.preventDefault();
+      try {
+          await axios.post('http://127.0.0.1:3000/api/admin/rescuers', newRescuer, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          toast.success("เพิ่มบัญชีกู้ภัยเรียบร้อยแล้ว");
+          setNewRescuer({ username: '', password: '', phone: '', foundation_id: '' });
+      } catch (e) { toast.error("Fail: " + (e.response?.data?.error || e.message)); }
+  };
 
   useEffect(() => {
      fetchStatus();
@@ -62,6 +100,15 @@ function AdminDashboard({ user, onLogout }) {
      } catch (e) { toast.error("Fail to broadcast: " + e.message); }
   };
 
+  const sendLineBroadcast = async () => {
+     if(!lineBroadcastMsg.trim()) return;
+     try {
+         await axios.post('http://127.0.0.1:3000/api/admin/line-broadcast', { message: lineBroadcastMsg }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         toast.success("📱 ส่งข่าวสารผ่าน LINE OA เรียบร้อยแล้ว!");
+         setLineBroadcastMsg('');
+     } catch (e) { toast.error("Fail to send LINE broadcast: " + (e.response?.data?.error || e.message)); }
+  };
+
   const exportToCSV = () => {
       const headers = ["ID", "Status", "Details", "Citizen Phone", "Assigned Unit", "Response Time (Seconds)", "Created At", "Resolved At"];
       const rows = history.map(h => {
@@ -87,6 +134,7 @@ function AdminDashboard({ user, onLogout }) {
             <p style={{ margin: 0, color: '#94a3b8' }}>Admin mode: {user.username}</p>
          </div>
          <div>
+            <button onClick={openManageModal} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', marginRight: '10px', fontWeight: 'bold' }}>⚙️ จัดการหน่วยกู้ภัย</button>
             <button onClick={onLogout} style={{ background: 'transparent', color: '#94a3b8', border: '1px solid #475569', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>Log Out</button>
          </div>
       </header>
@@ -148,14 +196,25 @@ function AdminDashboard({ user, onLogout }) {
                </div>
             ))}
 
-            {/* BROADCAST CENTER */}
-            <div className="glass-panel" style={{ padding: '20px', marginTop: '20px', borderLeft: '4px solid #3b82f6' }}>
-                <h3 style={{ margin: '0 0 15px 0', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '20px' }}>📢</span> แจ้งเตือนฉุกเฉิน (Broadcast)
+            {/* BROADCAST CENTER (Urgent for Rescuers) */}
+            <div className="glass-panel" style={{ padding: '20px', marginTop: '20px', borderLeft: '4px solid #ef4444' }}>
+                <h3 style={{ margin: '0 0 15px 0', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '20px' }}>📢</span> แจ้งเตือนฉุกเฉิน (ถึงรถกู้ภัย)
                 </h3>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                    <input value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} onKeyDown={e=> e.key === 'Enter' && sendBroadcast()} placeholder="พิมพ์ข้อความกระจายเสียง..." style={{ flex: 1, padding: '12px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white', outline: 'none' }} />
-                    <button onClick={sendBroadcast} className="btn" style={{ background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ยิงประกาศ 🚀</button>
+                    <input value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} onKeyDown={e=> e.key === 'Enter' && sendBroadcast()} placeholder="พิมพ์ข้อความสั่งการรถกู้ภัย..." style={{ flex: 1, padding: '12px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white', outline: 'none' }} />
+                    <button onClick={sendBroadcast} className="btn" style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ยิงประกาศด่วน 🚀</button>
+                </div>
+            </div>
+
+            {/* LINE OA BROADCAST (General News for Citizens) */}
+            <div className="glass-panel" style={{ padding: '20px', marginTop: '20px', borderLeft: '4px solid #10b981' }}>
+                <h3 style={{ margin: '0 0 15px 0', color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '20px' }}>📱</span> แจ้งข่าวสาร LINE OA (ถึงประชาชน)
+                </h3>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <input value={lineBroadcastMsg} onChange={e=>setLineBroadcastMsg(e.target.value)} onKeyDown={e=> e.key === 'Enter' && sendLineBroadcast()} placeholder="พิมพ์ข่าวสารทั่วไป หรือพยากรณ์อากาศ..." style={{ flex: 1, padding: '12px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white', outline: 'none' }} />
+                    <button onClick={sendLineBroadcast} className="btn" style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ยิงข่าวสาร LINE 🚀</button>
                 </div>
             </div>
             
@@ -213,6 +272,45 @@ function AdminDashboard({ user, onLogout }) {
             </div>
          </div>
       </div>
+
+      {/* MANAGE MODAL */}
+      {showManageModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ background: '#1e293b', padding: '30px', borderRadius: '12px', width: '500px', maxWidth: '90%', color: 'white', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '15px', marginBottom: '20px' }}>
+                    <h2 style={{ margin: 0, color: '#3b82f6' }}>⚙️ จัดการระบบ (Admin Management)</h2>
+                    <button onClick={() => setShowManageModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>&times;</button>
+                </div>
+
+                {/* Foundation Form */}
+                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px', marginBottom: '20px' }}>
+                    <h3 style={{ margin: '0 0 15px 0', color: '#10b981' }}>🏢 เพิ่มมูลนิธิ/สังกัดใหม่</h3>
+                    <form onSubmit={handleAddFoundation}>
+                        <input value={newFoundation.name} onChange={e=>setNewFoundation({...newFoundation, name: e.target.value})} placeholder="ชื่อมูลนิธิ (เช่น ป่อเต็กตึ๊ง, ร่วมกตัญญู)" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
+                        <input value={newFoundation.contact_info} onChange={e=>setNewFoundation({...newFoundation, contact_info: e.target.value})} placeholder="ข้อมูลติดต่อ (เช่น เบอร์สายด่วน, ที่อยู่)" style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
+                        <button type="submit" style={{ width: '100%', background: '#10b981', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ สร้างมูลนิธิ</button>
+                    </form>
+                </div>
+
+                {/* Rescuer Form */}
+                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px' }}>
+                    <h3 style={{ margin: '0 0 15px 0', color: '#f59e0b' }}>🚑 เพิ่มบัญชีรถกู้ภัย</h3>
+                    <form onSubmit={handleAddRescuer}>
+                        <select value={newRescuer.foundation_id} onChange={e=>setNewRescuer({...newRescuer, foundation_id: e.target.value})} required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}>
+                            <option value="">-- เลือกมูลนิธิ/สังกัด --</option>
+                            {foundations.map(f => (
+                                <option key={f.id} value={f.id}>{f.name}</option>
+                            ))}
+                        </select>
+                        <input value={newRescuer.username} onChange={e=>setNewRescuer({...newRescuer, username: e.target.value})} placeholder="Username (สำหรับให้คนขับใช้ Login)" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
+                        <input value={newRescuer.password} onChange={e=>setNewRescuer({...newRescuer, password: e.target.value})} placeholder="Password" type="password" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
+                        <input value={newRescuer.phone} onChange={e=>setNewRescuer({...newRescuer, phone: e.target.value})} placeholder="เบอร์โทรศัพท์รถกู้ภัยคันนี้" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
+                        <button type="submit" style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ สร้างบัญชีกู้ภัย</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 }
