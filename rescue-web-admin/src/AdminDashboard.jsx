@@ -1,8 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
+
+function HeatmapLayer({ data }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!data || data.length === 0) return;
+    let heat;
+    let isMounted = true;
+    const initHeatmap = async () => {
+        window.L = L;
+        await import('leaflet.heat');
+        if (!isMounted) return;
+        const points = data.map(p => [parseFloat(p.latitude), parseFloat(p.longitude), 1]);
+        heat = L.heatLayer(points, {
+          radius: 25,
+          blur: 15,
+          maxZoom: 17,
+          gradient: { 0.4: 'blue', 0.6: 'cyan', 0.7: 'lime', 0.8: 'yellow', 1.0: 'red' }
+        }).addTo(map);
+    };
+    initHeatmap();
+
+    return () => {
+      isMounted = false;
+      if (heat) map.removeLayer(heat);
+    };
+  }, [map, data]);
+  return null;
+}
+
 
 const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] };
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
@@ -12,6 +41,7 @@ function AdminDashboard({ user, onLogout }) {
   const [incidents, setIncidents] = useState([]);
   const [rescuers, setRescuers] = useState([]);
   const [history, setHistory] = useState([]);
+  const [showHeatmap, setShowHeatmap] = useState(false);
   const [avgTime, setAvgTime] = useState(0);
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [lineBroadcastMsg, setLineBroadcastMsg] = useState('');
@@ -156,6 +186,12 @@ function AdminDashboard({ user, onLogout }) {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
          {/* LEFT MAP */}
          <div style={{ flex: 2, position: 'relative' }}>
+             <button 
+                 onClick={() => setShowHeatmap(!showHeatmap)} 
+                 style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 1000, background: showHeatmap ? '#ef4444' : '#1e293b', color: 'white', border: `2px solid ${showHeatmap ? '#ef4444' : '#334155'}`, padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 4px 6px rgba(0,0,0,0.3)', transition: '0.3s' }}>
+                 {showHeatmap ? '🔥 ปิดโหมด Heatmap' : '📊 เปิดโหมด Heatmap'}
+             </button>
+             
              <MapContainer center={[13.7563, 100.5018]} zoom={11} style={{ height: '100%', width: '100%' }}>
                 <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                 
@@ -182,11 +218,15 @@ function AdminDashboard({ user, onLogout }) {
                 ))}
 
                 {/* Heatmap Layer for Resolved historical points */}
-                {history.filter(h => h.latitude && h.longitude).map(h => (
-                     <CircleMarker key={'heat'+h.id} center={[h.latitude, h.longitude]} radius={15} pathOptions={{ color: 'transparent', fillColor: h.status === 'Resolved' ? '#ef4444' : '#64748b', fillOpacity: 0.15 }}>
-                         <Popup>Incident #{h.id} ({h.status})</Popup>
-                     </CircleMarker>
-                ))}
+                {showHeatmap ? (
+                    <HeatmapLayer data={history.filter(h => h.latitude && h.longitude)} />
+                ) : (
+                    history.filter(h => h.latitude && h.longitude).map(h => (
+                         <CircleMarker key={'heat'+h.id} center={[h.latitude, h.longitude]} radius={15} pathOptions={{ color: 'transparent', fillColor: h.status === 'Resolved' ? '#ef4444' : '#64748b', fillOpacity: 0.15 }}>
+                             <Popup>Incident #{h.id} ({h.status})</Popup>
+                         </CircleMarker>
+                    ))
+                )}
              </MapContainer>
          </div>
 
