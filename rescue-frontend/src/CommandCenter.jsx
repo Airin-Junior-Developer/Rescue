@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
+import { API_URL } from './config';
+
 
 // Custom Map Icons
 const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] };
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
 const BlueIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png' });
 
-const socket = io('http://127.0.0.1:3000');
+const socket = io(API_URL);
 
 function CommandCenter({ user, onLogout }) {
   const [isOnline, setIsOnline] = useState(false);
@@ -22,6 +24,7 @@ function CommandCenter({ user, onLogout }) {
   // Driver Live GPS
   const [lat, setLat] = useState(13.7463);
   const [lng, setLng] = useState(100.5118);
+  const [gpsReady, setGpsReady] = useState(false);
   
   // Chat
   const [chatMessages, setChatMessages] = useState([]);
@@ -34,11 +37,23 @@ function CommandCenter({ user, onLogout }) {
     // 1. Fetch any existing active mission if app reloads
     fetchActiveMission();
 
-    // 2. Start GPS simulation (In real life, navigator.geolocation)
-    gpsInterval.current = setInterval(() => {
-       setLat(prev => prev + (Math.random() - 0.5) * 0.0002);
-       setLng(prev => prev + (Math.random() - 0.5) * 0.0002);
-    }, 10000);
+    // 2. Real GPS Tracking using navigator.geolocation
+    if (navigator.geolocation) {
+      gpsInterval.current = navigator.geolocation.watchPosition(
+        (position) => {
+          setLat(position.coords.latitude);
+          setLng(position.coords.longitude);
+          setGpsReady(true);
+        },
+        (error) => {
+          console.error("GPS Error: ", error);
+          setGpsReady(false);
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      );
+    } else {
+      toast.error("อุปกรณ์ของคุณไม่รองรับ GPS");
+    }
 
     // 3. Listen for Mission Offers (Broadcast System)
     socket.on('offer_mission', (mission) => {
@@ -62,7 +77,9 @@ function CommandCenter({ user, onLogout }) {
     });
 
     return () => {
-      clearInterval(gpsInterval.current);
+      if (gpsInterval.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(gpsInterval.current);
+      }
       socket.off('offer_mission');
       socket.off('cancel_offer');
       socket.off('new_chat_message');
@@ -82,7 +99,7 @@ function CommandCenter({ user, onLogout }) {
 
   const fetchActiveMission = async () => {
     try {
-      const res = await axios.get(`http://127.0.0.1:3000/api/incidents/active`, {
+      const res = await axios.get(`${API_URL}/api/incidents/active`, {
          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       if (res.data) {
@@ -94,7 +111,7 @@ function CommandCenter({ user, onLogout }) {
 
   const toggleOnline = () => {
       if (!isOnline) {
-          socket.emit('go_online', { user_id: user.id, foundation_id: user.foundation_id, phone: user.phone, latitude: lat, longitude: lng });
+          socket.emit('go_online', { user_id: user.id, username: user.username, foundation_id: user.foundation_id, phone: user.phone, latitude: lat, longitude: lng });
           toast.success("🌐 You are now ONLINE. Waiting for dispatch.");
           setIsOnline(true);
       } else {
@@ -106,7 +123,7 @@ function CommandCenter({ user, onLogout }) {
 
   const completeMission = async () => {
       try {
-          await axios.post(`http://127.0.0.1:3000/api/incidents/${activeMission.id}/complete`, {}, {
+          await axios.post(`${API_URL}/api/incidents/${activeMission.id}/complete`, {}, {
              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
           });
           toast.success("✅ Mission Completed successfully!");
@@ -155,7 +172,7 @@ function CommandCenter({ user, onLogout }) {
          <div style={{ display: 'flex', gap: '20px', width: '100%', maxWidth: '400px' }}>
             <button onClick={async () => {
                 try {
-                   await axios.post(`http://127.0.0.1:3000/api/incidents/${incomingMission.incident_id}/accept`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+                   await axios.post(`${API_URL}/api/incidents/${incomingMission.incident_id}/accept`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
                    const missionData = { id: incomingMission.incident_id, latitude: incomingMission.latitude, longitude: incomingMission.longitude, details: incomingMission.details, citizen_phone: incomingMission.citizen_phone, parent_incident_id: incomingMission.parent_incident_id };
                    setActiveMission(missionData);
                    setIncomingMission(null);
@@ -169,7 +186,7 @@ function CommandCenter({ user, onLogout }) {
             
             <button onClick={async () => {
                 setIncomingMission(null); 
-                await axios.post(`http://127.0.0.1:3000/api/incidents/${incomingMission.incident_id}/reject`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+                await axios.post(`${API_URL}/api/incidents/${incomingMission.incident_id}/reject`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
             }} style={{ flex: 1, background: 'transparent', color: '#ef4444', padding: '20px', fontSize: '18px', border: '2px solid #ef4444', borderRadius: '12px', cursor: 'pointer' }}>ข้ามเคสนี้</button>
          </div>
          <p style={{ marginTop: '30px', color: '#ef4444', fontWeight: 'bold' }}>⏳ หากถูกแย่งเคสไปแล้ว หน้านี้จะอัปเดตและดับไปเอง</p>
@@ -190,7 +207,7 @@ function CommandCenter({ user, onLogout }) {
             <button onClick={async () => {
               if (window.confirm('คุณต้องการเรียกขอกำลังเสริม 1 คันมายังจุดนี้ใช่หรือไม่?')) {
                 try {
-                  await axios.post(`http://127.0.0.1:3000/api/incidents/${activeMission.parent_incident_id || activeMission.id}/backup`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+                  await axios.post(`${API_URL}/api/incidents/${activeMission.parent_incident_id || activeMission.id}/backup`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
                   toast.success('วิทยุขอกำลังเสริมแล้ว! ระบบกำลังกระจายงานให้รถคันอื่นในพื้นที่');
                 } catch (e) {
                   toast.error(e.response?.data?.error || 'เซิร์ฟเวอร์ขัดข้อง');
@@ -250,10 +267,15 @@ function CommandCenter({ user, onLogout }) {
         <div className="glass-panel animate-slide-up" style={{ padding: '40px', textAlign: 'center', maxWidth: '400px', width: '100%' }}>
             <h1 className="text-gradient">🚑 Driver Companion</h1>
             <p style={{ color: '#94a3b8', marginBottom: '30px' }}>Role: {user.role} | Unit {user.id}</p>
-            
-            <div style={{ marginBottom: '40px' }}>
+
+            <div style={{ marginBottom: '20px' }}>
                 <span style={{ display: 'inline-block', width: '15px', height: '15px', borderRadius: '50%', background: isOnline ? '#10b981' : '#64748b', marginRight: '10px' }}></span>
                 <span style={{ color: '#fff', fontSize: '20px' }}>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '30px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: gpsReady ? '#10b981' : '#ef4444', display: 'inline-block' }}></span>
+                <span style={{ color: gpsReady ? '#10b981' : '#ef4444', fontSize: '13px' }}>{gpsReady ? 'GPS ✓' : 'GPS ยังไม่ได้รับสัญญาณ...'}</span>
             </div>
 
             <button 

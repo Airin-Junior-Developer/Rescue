@@ -5,6 +5,8 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import 'leaflet/dist/leaflet.css';
 import './index.css';
+import { API_URL } from './config';
+
 
 // Simple Login specifically for the Web Admin
 function Login({ onLogin }) {
@@ -14,7 +16,7 @@ function Login({ onLogin }) {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-        const res = await fetch('http://127.0.0.1:3000/api/login', {
+        const res = await fetch(`${API_URL}/api/login`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });

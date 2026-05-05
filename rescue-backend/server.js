@@ -51,7 +51,6 @@ pool.query('ALTER TABLE incidents ADD COLUMN resolved_at TIMESTAMP NULL').catch(
 
 // Auto-migrate Phone numbers for Rescue teams
 pool.query('ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL').catch(()=>{});
-pool.query('UPDATE users SET phone = "081-669-1234" WHERE role = "Rescue"').catch(()=>{});
 
 // Auto-migrate parent incident link for Backup feature
 pool.query('ALTER TABLE incidents ADD COLUMN parent_incident_id INT NULL').catch(()=>{});
@@ -61,6 +60,9 @@ pool.query('ALTER TABLE incidents ADD COLUMN citizen_phone VARCHAR(20) NULL').ca
 
 // Auto-migrate cancel reason
 pool.query('ALTER TABLE incidents ADD COLUMN cancel_reason VARCHAR(255) NULL').catch(()=>{});
+
+// Auto-migrate is_approved for Rescuer Approval
+pool.query('ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT TRUE').catch(()=>{});
 
 // Auto-migrate citizens table for LINE login
 pool.query(`
@@ -135,6 +137,11 @@ app.post('/api/login', async (req, res) => {
         const [users] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
         if (users.length > 0) {
             const user = users[0];
+            
+            if (user.role === 'Rescue' && user.is_approved === 0) {
+                return res.status(403).json({ error: 'บัญชีของคุณอยู่ระหว่างการรออนุมัติจากผู้ดูแลระบบ' });
+            }
+
             const isMatch = user.password.startsWith('$2b$') ? await bcrypt.compare(password, user.password) : password === user.password;
             
             if (isMatch) {
@@ -338,8 +345,8 @@ app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
 app.get('/api/admin/system-status', verifyToken, async (req, res) => {
     if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
     try {
-        const [incidents] = await pool.query('SELECT * FROM incidents WHERE status IN ("Pending", "Accepted")');
-        const [history] = await pool.query('SELECT * FROM incidents WHERE status IN ("Resolved", "Failed") ORDER BY id DESC LIMIT 500');
+        const [incidents] = await pool.query('SELECT i.*, u.username as assigned_username FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.status IN ("Pending", "Accepted")');
+        const [history] = await pool.query('SELECT i.*, u.username as assigned_username FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.status IN ("Resolved", "Failed") ORDER BY i.id DESC LIMIT 500');
         const [prank_stats] = await pool.query("SELECT citizen_phone, COUNT(*) as count FROM incidents WHERE cancel_reason = 'ก่อกวน / แจ้งเล่น' GROUP BY citizen_phone ORDER BY count DESC LIMIT 50");
         
         let totalResponseTimeMs = 0;
@@ -465,6 +472,14 @@ app.get('/api/admin/foundations', verifyToken, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }) }
 });
 
+// Public Get Foundations
+app.get('/api/foundations/public', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM foundations');
+        res.json(rows);
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
 // Admin Add Rescuer
 app.post('/api/admin/rescuers', verifyToken, async (req, res) => {
     if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
@@ -480,6 +495,71 @@ app.post('/api/admin/rescuers', verifyToken, async (req, res) => {
             [username, hashed, 'Rescue', foundation_id, phone || null]);
         
         res.status(201).json({ message: 'Rescuer created', id: result.insertId });
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Admin Add Rescuer (Bulk CSV)
+app.post('/api/admin/rescuers/bulk', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { rescuers } = req.body;
+        if (!Array.isArray(rescuers) || rescuers.length === 0) return res.status(400).json({ error: 'Empty array' });
+        
+        let successCount = 0;
+        for (const r of rescuers) {
+            const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [r.username]);
+            if (existing.length === 0) {
+                const hashed = await bcrypt.hash(r.password.toString(), 10);
+                await pool.query('INSERT INTO users (username, password, role, foundation_id, phone, is_approved) VALUES (?, ?, ?, ?, ?, ?)', 
+                    [r.username, hashed, 'Rescue', r.foundation_id, r.phone || null, true]);
+                successCount++;
+            }
+        }
+        res.status(201).json({ message: `เพิ่มบัญชีสำเร็จ ${successCount} รายการ` });
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Driver Self-Registration (Public API)
+app.post('/api/rescuers/register', async (req, res) => {
+    try {
+        const { username, password, foundation_id, phone } = req.body;
+        if (!username || !password || !foundation_id) return res.status(400).json({ error: 'Missing required fields' });
+        
+        const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [username]);
+        if (existing.length > 0) return res.status(400).json({ error: 'Username already exists' });
+        
+        const hashed = await bcrypt.hash(password, 10);
+        await pool.query('INSERT INTO users (username, password, role, foundation_id, phone, is_approved) VALUES (?, ?, ?, ?, ?, ?)', 
+            [username, hashed, 'Rescue', foundation_id, phone || null, false]);
+        
+        res.status(201).json({ message: 'ลงทะเบียนสำเร็จ โปรดรอการอนุมัติ' });
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Admin Get Pending Rescuers
+app.get('/api/admin/rescuers/pending', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const [rows] = await pool.query('SELECT u.id, u.username, u.phone, f.name as foundation_name FROM users u LEFT JOIN foundations f ON u.foundation_id = f.id WHERE u.role = "Rescue" AND u.is_approved = FALSE');
+        res.json(rows);
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Admin Approve Rescuer
+app.post('/api/admin/rescuers/:id/approve', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        await pool.query('UPDATE users SET is_approved = TRUE WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Approved' });
+    } catch(e) { res.status(500).json({ error: e.message }) }
+});
+
+// Admin Reject Rescuer
+app.post('/api/admin/rescuers/:id/reject', verifyToken, async (req, res) => {
+    if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        await pool.query('DELETE FROM users WHERE id = ? AND is_approved = FALSE', [req.params.id]);
+        res.json({ message: 'Rejected and deleted' });
     } catch(e) { res.status(500).json({ error: e.message }) }
 });
 
@@ -544,10 +624,10 @@ io.on('connection', (socket) => {
     console.log('⚡ Connected:', socket.id);
 
     // 1. Driver goes online (Available for Auto-Dispatch)
-    socket.on('go_online', async ({ user_id, foundation_id, latitude, longitude, phone }) => {
+    socket.on('go_online', async ({ user_id, username, foundation_id, latitude, longitude, phone }) => {
         await redisClient.sendCommand(['GEOADD', 'online_rescuers', longitude.toString(), latitude.toString(), user_id.toString()]);
         await redisClient.set(`rescuer_status:${user_id}`, JSON.stringify({
-            status: 'available', foundation_id, phone, latitude, longitude
+            status: 'available', username, foundation_id, phone, latitude, longitude
         }));
         socket.join(`driver_${user_id}`);
         console.log(`Driver ${user_id} is ONLINE via Mobile.`);

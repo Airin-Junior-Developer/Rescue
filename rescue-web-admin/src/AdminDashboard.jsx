@@ -3,6 +3,8 @@ import axios from 'axios';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
+import { API_URL } from './config';
+
 
 function HeatmapLayer({ data }) {
   const map = useMap();
@@ -52,6 +54,7 @@ function AdminDashboard({ user, onLogout }) {
   const [foundations, setFoundations] = useState([]);
   const [newFoundation, setNewFoundation] = useState({ name: '', contact_info: '' });
   const [newRescuer, setNewRescuer] = useState({ username: '', password: '', phone: '', foundation_id: '' });
+  const [pendingRescuers, setPendingRescuers] = useState([]);
 
   // Cancel Modal State
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -60,20 +63,28 @@ function AdminDashboard({ user, onLogout }) {
 
   const fetchFoundations = async () => {
      try {
-         const res = await axios.get('http://127.0.0.1:3000/api/admin/foundations', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         const res = await axios.get(`${API_URL}/api/admin/foundations`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
          setFoundations(res.data);
      } catch (e) { console.error("Failed to fetch foundations", e); }
+  };
+
+  const fetchPendingRescuers = async () => {
+      try {
+          const res = await axios.get(`${API_URL}/api/admin/rescuers/pending`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          setPendingRescuers(res.data);
+      } catch (e) { console.error("Failed to fetch pending rescuers", e); }
   };
 
   const openManageModal = () => {
       setShowManageModal(true);
       fetchFoundations();
+      fetchPendingRescuers();
   };
 
   const handleAddFoundation = async (e) => {
       e.preventDefault();
       try {
-          await axios.post('http://127.0.0.1:3000/api/admin/foundations', newFoundation, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          await axios.post(`${API_URL}/api/admin/foundations`, newFoundation, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
           toast.success("เพิ่มมูลนิธิเรียบร้อยแล้ว");
           setNewFoundation({ name: '', contact_info: '' });
           fetchFoundations(); // refresh list
@@ -83,21 +94,77 @@ function AdminDashboard({ user, onLogout }) {
   const handleAddRescuer = async (e) => {
       e.preventDefault();
       try {
-          await axios.post('http://127.0.0.1:3000/api/admin/rescuers', newRescuer, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          await axios.post(`${API_URL}/api/admin/rescuers`, newRescuer, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
           toast.success("เพิ่มบัญชีกู้ภัยเรียบร้อยแล้ว");
           setNewRescuer({ username: '', password: '', phone: '', foundation_id: '' });
       } catch (e) { toast.error("Fail: " + (e.response?.data?.error || e.message)); }
   };
 
+  const handleCSVUpload = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+          const text = event.target.result;
+          const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+          if (lines.length === 0) return;
+          const startIndex = lines[0].toLowerCase().includes('username') ? 1 : 0;
+          const rescuers = [];
+          for (let i = startIndex; i < lines.length; i++) {
+              const cols = lines[i].split(',').map(c => c.trim());
+              if (cols.length >= 4) rescuers.push({ username: cols[0], password: cols[1], phone: cols[2], foundation_id: cols[3] });
+          }
+          if (rescuers.length === 0) return toast.error("ไม่มีข้อมูลที่ใช้ได้ หรือฟอร์แมต CSV ผิด");
+          try {
+              const res = await axios.post(`${API_URL}/api/admin/rescuers/bulk`, { rescuers }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+              toast.success(res.data.message || `อัปโหลดสำเร็จ`);
+              e.target.value = null;
+          } catch(err) { toast.error("Bulk Upload Error: " + (err.response?.data?.error || err.message)); }
+      };
+      reader.readAsText(file);
+  };
+
+  const downloadTemplate = () => {
+      const csvContent = "data:text/csv;charset=utf-8,\uFEFFusername,password,phone,foundation_id\ndriver01,123456,0811111111,1\ndriver02,123456,0822222222,1";
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "rescuer_template.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const handleApprove = async (id) => {
+      try {
+          await axios.post(`${API_URL}/api/admin/rescuers/${id}/approve`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          toast.success("อนุมัติบัญชีสำเร็จ");
+          fetchPendingRescuers();
+      } catch (e) { toast.error("Fail: " + (e.response?.data?.error || e.message)); }
+  };
+
+  const handleReject = async (id) => {
+      if(!window.confirm("คุณแน่ใจหรือไม่ที่จะปฏิเสธและลบบัญชีนี้?")) return;
+      try {
+          await axios.post(`${API_URL}/api/admin/rescuers/${id}/reject`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+          toast.info("ปฏิเสธคำขอแล้ว");
+          fetchPendingRescuers();
+      } catch (e) { toast.error("Fail: " + (e.response?.data?.error || e.message)); }
+  };
+
   useEffect(() => {
      fetchStatus();
-     const interval = setInterval(fetchStatus, 3000);
+     fetchPendingRescuers();
+     const interval = setInterval(() => {
+         fetchStatus();
+         fetchPendingRescuers();
+     }, 3000);
      return () => clearInterval(interval);
   }, []);
 
   const fetchStatus = async () => {
     try {
-      const res = await axios.get('http://127.0.0.1:3000/api/admin/system-status', {
+      const res = await axios.get(`${API_URL}/api/admin/system-status`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setIncidents(res.data.incidents || []);
@@ -118,7 +185,7 @@ function AdminDashboard({ user, onLogout }) {
      if (!cancelIncidentId) return;
 
      try {
-         await axios.post(`http://127.0.0.1:3000/api/admin/incidents/${cancelIncidentId}/cancel`, { reason: cancelReason }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         await axios.post(`${API_URL}/api/admin/incidents/${cancelIncidentId}/cancel`, { reason: cancelReason }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
          toast.success("ยกเลิกเหตุการณ์และบันทึกเหตุผลเรียบร้อย");
          setShowCancelModal(false);
          setCancelIncidentId(null);
@@ -138,7 +205,7 @@ function AdminDashboard({ user, onLogout }) {
   const sendBroadcast = async () => {
      if(!broadcastMsg.trim()) return;
      try {
-         await axios.post('http://127.0.0.1:3000/api/admin/broadcast', { message: broadcastMsg }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         await axios.post(`${API_URL}/api/admin/broadcast`, { message: broadcastMsg }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
          toast.success("📢 ประกาศกระจายให้รถกู้ภัยทุกคันแล้ว!");
          setBroadcastMsg('');
      } catch (e) { toast.error("Fail to broadcast: " + e.message); }
@@ -147,7 +214,7 @@ function AdminDashboard({ user, onLogout }) {
   const sendLineBroadcast = async () => {
      if(!lineBroadcastMsg.trim()) return;
      try {
-         await axios.post('http://127.0.0.1:3000/api/admin/line-broadcast', { message: lineBroadcastMsg }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         await axios.post(`${API_URL}/api/admin/line-broadcast`, { message: lineBroadcastMsg }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
          toast.success("📱 ส่งข่าวสารผ่าน LINE OA เรียบร้อยแล้ว!");
          setLineBroadcastMsg('');
      } catch (e) { toast.error("Fail to send LINE broadcast: " + (e.response?.data?.error || e.message)); }
@@ -210,7 +277,7 @@ function AdminDashboard({ user, onLogout }) {
                 {rescuers.map((r) => (
                     <Marker key={'res'+r.id} position={[r.latitude, r.longitude]} icon={BlueIcon}>
                         <Popup>
-                            <strong>🚑 Rescuer Unit #{r.id}</strong><br/>
+                            <strong>🚑 {r.username || `Rescuer Unit #${r.id}`}</strong><br/>
                             Status: <span style={{color: r.status === 'available' ? 'green' : 'red'}}>{r.status}</span><br/>
                             Phone: {r.phone}
                         </Popup>
@@ -307,7 +374,7 @@ function AdminDashboard({ user, onLogout }) {
                                             {h.status.toUpperCase()}
                                         </span>
                                     </td>
-                                    <td style={{ padding: '10px', color: '#94a3b8', textAlign: 'right' }}>{h.assigned_user_id ? `Unit ${h.assigned_user_id}` : '-'}</td>
+                                    <td style={{ padding: '10px', color: '#94a3b8', textAlign: 'right' }}>{h.assigned_user_id ? (h.assigned_username || `Unit ${h.assigned_user_id}`) : '-'}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -341,7 +408,7 @@ function AdminDashboard({ user, onLogout }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 {rescuers.map(r => (
                     <div key={r.id} style={{ padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', textAlign: 'center', borderTop: `4px solid ${r.status === 'available' ? '#10b981' : '#f59e0b'}` }}>
-                        <h3 style={{ margin: '0 0 5px 0' }}>Unit #{r.id}</h3>
+                        <h3 style={{ margin: '0 0 5px 0' }}>{r.username || `Unit #${r.id}`}</h3>
                         <p style={{ margin: 0, padding: '2px 8px', background: r.status === 'available' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)', color: r.status === 'available' ? '#10b981' : '#f59e0b', borderRadius: '10px', display: 'inline-block', fontSize: '12px', fontWeight: 'bold' }}>{r.status.toUpperCase()}</p>
                     </div>
                 ))}
@@ -369,8 +436,17 @@ function AdminDashboard({ user, onLogout }) {
                 </div>
 
                 {/* Rescuer Form */}
-                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px' }}>
-                    <h3 style={{ margin: '0 0 15px 0', color: '#f59e0b' }}>🚑 เพิ่มบัญชีรถกู้ภัย</h3>
+                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px', marginBottom: '20px' }}>
+                    <h3 style={{ margin: '0 0 15px 0', color: '#f59e0b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>🚑 เพิ่มบัญชีรถกู้ภัย</span>
+                        <div>
+                           <button onClick={downloadTemplate} style={{ background: 'transparent', color: '#3b82f6', border: '1px solid #3b82f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', marginRight: '5px' }}>📥 โหลดแบบฟอร์ม CSV</button>
+                           <label style={{ background: '#3b82f6', color: 'white', padding: '5px 10px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', display: 'inline-block' }}>
+                               📤 อัปโหลด CSV รวดเดียว
+                               <input type="file" accept=".csv" onChange={handleCSVUpload} style={{ display: 'none' }} />
+                           </label>
+                        </div>
+                    </h3>
                     <form onSubmit={handleAddRescuer}>
                         <select value={newRescuer.foundation_id} onChange={e=>setNewRescuer({...newRescuer, foundation_id: e.target.value})} required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}>
                             <option value="">-- เลือกมูลนิธิ/สังกัด --</option>
@@ -381,8 +457,28 @@ function AdminDashboard({ user, onLogout }) {
                         <input value={newRescuer.username} onChange={e=>setNewRescuer({...newRescuer, username: e.target.value})} placeholder="Username (สำหรับให้คนขับใช้ Login)" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
                         <input value={newRescuer.password} onChange={e=>setNewRescuer({...newRescuer, password: e.target.value})} placeholder="Password" type="password" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
                         <input value={newRescuer.phone} onChange={e=>setNewRescuer({...newRescuer, phone: e.target.value})} placeholder="เบอร์โทรศัพท์รถกู้ภัยคันนี้" required style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-                        <button type="submit" style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ สร้างบัญชีกู้ภัย</button>
+                        <button type="submit" style={{ width: '100%', background: '#f59e0b', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>+ สร้างบัญชีกู้ภัยทีละ 1 คัน</button>
                     </form>
+                </div>
+
+                {/* Pending Approvals */}
+                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px' }}>
+                    <h3 style={{ margin: '0 0 15px 0', color: '#10b981' }}>⏱️ รอการอนุมัติ (Self-Registration)</h3>
+                    {pendingRescuers.length === 0 ? <p style={{ color: '#94a3b8', margin: 0 }}>ไม่มีคำขอสมัครกู้ภัยในขณะนี้</p> : null}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {pendingRescuers.map(r => (
+                            <div key={r.id} style={{ background: '#0f172a', padding: '15px', borderRadius: '8px', border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                    <h4 style={{ margin: '0 0 5px 0', color: '#f8fafc' }}>{r.username}</h4>
+                                    <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>สังกัด: {r.foundation_name} | โทร: {r.phone}</p>
+                                </div>
+                                <div style={{ display: 'flex', gap: '5px' }}>
+                                    <button onClick={() => handleApprove(r.id)} style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', border: '1px solid #10b981', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>✅ อนุมัติ</button>
+                                    <button onClick={() => handleReject(r.id)} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: '1px solid #ef4444', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>❌ ลบ</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>

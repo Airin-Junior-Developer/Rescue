@@ -8,12 +8,14 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
 import liff from '@line/liff';
+import { API_URL } from './config';
+
 
 const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] };
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
 const BlueIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png' });
 
-const socket = io('http://127.0.0.1:3000');
+const socket = io(API_URL);
 
 function CitizenSOS() {
   const [details, setDetails] = useState('');
@@ -56,7 +58,7 @@ function CitizenSOS() {
         if (liff.isLoggedIn()) {
           liff.getProfile().then(profile => {
             setLineUid(profile.userId);
-            axios.post('http://127.0.0.1:3000/api/citizen/auth', { line_uid: profile.userId, display_name: profile.displayName })
+            axios.post(`${API_URL}/api/citizen/auth`, { line_uid: profile.userId, display_name: profile.displayName })
               .then(res => {
                 if (res.data.phone) {
                   setCitizenPhone(res.data.phone);
@@ -78,7 +80,7 @@ function CitizenSOS() {
     const saved = localStorage.getItem('activeCitizenIncident');
     if (saved) {
        const incident = JSON.parse(saved);
-       axios.get(`http://127.0.0.1:3000/api/incidents/status/${incident.id}`)
+       axios.get(`${API_URL}/api/incidents/status/${incident.id}`)
           .then(res => {
               if (res.data.status === 'Resolved' || res.data.status === 'Completed') {
                   localStorage.removeItem('activeCitizenIncident');
@@ -160,7 +162,7 @@ function CitizenSOS() {
           return;
       }
       try {
-          await axios.post('http://127.0.0.1:3000/api/citizen/register-phone', { line_uid: lineUid, phone: registerPhoneInput });
+          await axios.post(`${API_URL}/api/citizen/register-phone`, { line_uid: lineUid, phone: registerPhoneInput });
           setCitizenPhone(registerPhoneInput);
           setShowRegister(false);
           toast.success('ลงทะเบียนเบอร์โทรสำเร็จ! คุณสามารถกดแจ้งเหตุฉุกเฉินได้ทันที');
@@ -180,7 +182,7 @@ function CitizenSOS() {
     try {
       toast.info('🔍 กำลังค้นหารถกู้ภัยที่ใกล้ที่สุดให้คุณ...');
       setIsSearching(true);
-      const res = await axios.post('http://127.0.0.1:3000/api/incidents', {
+      const res = await axios.post(`${API_URL}/api/incidents`, {
         details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone, line_uid: lineUid
       });
       setSearchingIncidentId(res.data.incident_id);

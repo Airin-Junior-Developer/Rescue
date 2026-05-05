@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './Login';
 import CitizenSOS from './CitizenSOS';
 import CommandCenter from './CommandCenter';
+import RescuerRegister from './RescuerRegister';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import 'leaflet/dist/leaflet.css';
@@ -28,6 +29,7 @@ function App() {
       <Routes>
         <Route path="/" element={<CitizenSOS />} />
         <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/dashboard" />} />
+        <Route path="/register" element={<RescuerRegister />} />
         <Route path="/dashboard" element={
             user ? <CommandCenter user={user} onLogout={handleLogout} /> : <Navigate to="/login" />
         } />

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
+import { API_URL } from './config';
+
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -11,7 +13,7 @@ function Login({ onLogin }) {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://127.0.0.1:3000/api/login', { username, password });
+      const res = await axios.post(`${API_URL}/api/login`, { username, password });
       toast.success('Login Successful');
       localStorage.setItem('token', res.data.token);
       onLogin(res.data.user);
@@ -38,7 +40,10 @@ function Login({ onLogin }) {
           <button type="submit" className="btn btn-primary" style={{width:'100%'}}>Sign In to Command Center</button>
         </form>
 
-        <div style={{ marginTop: '30px', textAlign: 'center' }}>
+        <div style={{ marginTop: '20px', textAlign: 'center' }}>
+          <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '15px' }}>
+            ไม่มีบัญชี? <Link to="/register" style={{ color: '#3b82f6', textDecoration: 'underline' }}>สมัครเป็นกู้ภัย</Link>
+          </p>
           <Link to="/" style={{ textDecoration: 'none', color: '#94a3b8', fontSize: '14px', transition: 'color 0.3s' }}>
             &larr; Back to Citizen SOS
           </Link>
