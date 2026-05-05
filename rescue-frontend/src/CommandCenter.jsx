@@ -275,7 +275,7 @@ function CommandCenter({ user, onLogout }) {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '30px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: gpsReady ? '#10b981' : '#ef4444', display: 'inline-block' }}></span>
-                <span style={{ color: gpsReady ? '#10b981' : '#ef4444', fontSize: '13px' }}>{gpsReady ? 'GPS ✓' : 'GPS ยังไม่ได้รับสัญญาณ...'}</span>
+                <span style={{ color: gpsReady ? '#10b981' : '#ef4444', fontSize: '13px' }}>{gpsReady ? 'GPS สด ✓' : 'GPS ยังไม่ได้รับสัญญาณ...'}</span>
             </div>
 
             <button 
