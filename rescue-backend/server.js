@@ -107,6 +107,22 @@ const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://
 redisClient.on('error', (err) => console.log('Redis error:', err));
 redisClient.connect().then(() => console.log('Connected to Redis'));
 
+// 🗑️ Auto-Cleanup: Delete chat messages older than 3 days
+async function cleanupChatHistory() {
+    try {
+        const [result] = await pool.query('DELETE FROM chat_messages WHERE timestamp < NOW() - INTERVAL 3 DAY');
+        if (result.affectedRows > 0) {
+            console.log(`[CLEANUP] Deleted ${result.affectedRows} old chat messages.`);
+        }
+    } catch (e) {
+        console.error('[CLEANUP ERROR]', e);
+    }
+}
+
+// Run cleanup every 1 hour
+setInterval(cleanupChatHistory, 3600000);
+cleanupChatHistory(); // Run once at startup
+
 // Global Memory for Dispatch Queues (Handling Timeouts)
 const dispatchState = {};
 
