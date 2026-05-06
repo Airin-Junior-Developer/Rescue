@@ -669,6 +669,15 @@ io.on('connection', (socket) => {
             if (stat.status === 'available') {
                 await redisClient.sendCommand(['GEOADD', 'online_rescuers', longitude.toString(), latitude.toString(), vehicle_id.toString()]);
             }
+
+            // 🔴 Broadcast real-time location to all admins instantly (no polling needed)
+            io.to('admin_room').emit('rescuer_location_update', {
+                vehicle_id,
+                username: stat.username || vehicle_id,
+                latitude,
+                longitude,
+                status: stat.status
+            });
         }
 
         // Broadcast directly to Citizen who is waiting in `incident_room_123`
@@ -676,6 +685,7 @@ io.on('connection', (socket) => {
             io.to(`incident_room_${active_incident_id}`).emit('vehicle_location_updated', { latitude, longitude });
         }
     });
+
 
     // 3. Citizen / Worker joins private Chat & GPS Tracker Room
     socket.on('join_incident_room', (incident_id) => {

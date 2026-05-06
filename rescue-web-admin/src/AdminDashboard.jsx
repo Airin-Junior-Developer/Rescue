@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
 import { API_URL } from './config';
+
+const socket = io(API_URL);
 
 
 function HeatmapLayer({ data }) {
@@ -155,11 +158,26 @@ function AdminDashboard({ user, onLogout }) {
   useEffect(() => {
      fetchStatus();
      fetchPendingRescuers();
+     // Keep polling every 10s for full data sync (incidents, history, etc.)
      const interval = setInterval(() => {
          fetchStatus();
          fetchPendingRescuers();
-     }, 3000);
-     return () => clearInterval(interval);
+     }, 10000);
+
+     // Real-time location updates via Socket.IO (no delay!)
+     socket.emit('join_admin_room');
+     socket.on('rescuer_location_update', (data) => {
+         setRescuers(prev => prev.map(r =>
+             r.user_id === data.vehicle_id
+                 ? { ...r, latitude: data.latitude, longitude: data.longitude }
+                 : r
+         ));
+     });
+
+     return () => {
+         clearInterval(interval);
+         socket.off('rescuer_location_update');
+     };
   }, []);
 
   const fetchStatus = async () => {

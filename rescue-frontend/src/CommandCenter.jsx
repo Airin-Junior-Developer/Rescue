@@ -90,8 +90,9 @@ function CommandCenter({ user, onLogout }) {
   // Update Redis Location repeatedly
   useEffect(() => {
       if (isOnline || activeMission) {
+          const roomId = activeMission?.parent_incident_id || activeMission?.id;
           socket.emit('update_vehicle_location', {
-              vehicle_id: user.id, latitude: lat, longitude: lng, active_incident_id: activeMission?.id
+              vehicle_id: user.id, latitude: lat, longitude: lng, active_incident_id: roomId
           });
       }
   }, [lat, lng, isOnline, activeMission]);
@@ -104,7 +105,8 @@ function CommandCenter({ user, onLogout }) {
       });
       if (res.data) {
          setActiveMission(res.data);
-         socket.emit('join_incident_room', res.data.id);
+         const roomId = res.data.parent_incident_id || res.data.id;
+         socket.emit('join_incident_room', roomId);
       }
     } catch(e) { }
   };
@@ -144,8 +146,9 @@ function CommandCenter({ user, onLogout }) {
 
   const sendMessage = () => {
     if (!chatInput.trim() || !activeMission) return;
+    const roomId = activeMission.parent_incident_id || activeMission.id;
     socket.emit('send_chat_message', {
-      incident_id: activeMission.id, sender: 'Staff', message: chatInput
+      incident_id: roomId, sender: 'Staff', message: chatInput
     });
     setChatInput('');
   };
