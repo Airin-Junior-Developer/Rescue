@@ -92,6 +92,17 @@ pool.query(`
     )
 `).catch(()=>{});
 
+pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        incident_id INT NOT NULL,
+        sender VARCHAR(50) NOT NULL,
+        message TEXT NOT NULL,
+        image LONGTEXT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+`).catch(()=>{});
+
 const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
 redisClient.on('error', (err) => console.log('Redis error:', err));
 redisClient.connect().then(() => console.log('Connected to Redis'));
@@ -588,6 +599,35 @@ app.get('/api/incidents/active', verifyToken, async (req, res) => {
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+// Driver get chat history
+app.get('/api/incidents/:id/chat', verifyToken, async (req, res) => {
+    try {
+        const incident_id = req.params.id;
+        const [rows] = await pool.query(`
+            SELECT * FROM chat_messages 
+            WHERE incident_id = ? 
+               OR incident_id = (SELECT COALESCE(parent_incident_id, id) FROM incidents WHERE id = ?)
+               OR incident_id IN (SELECT id FROM incidents WHERE parent_incident_id = ?)
+            ORDER BY timestamp ASC
+        `, [incident_id, incident_id, incident_id]);
+        res.json(rows);
+    } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Citizen get chat history (public/liff protected by incident logic)
+app.get('/api/citizen/incidents/:id/chat', async (req, res) => {
+    try {
+        const incident_id = req.params.id;
+        const [rows] = await pool.query(`
+            SELECT * FROM chat_messages 
+            WHERE incident_id = ? 
+               OR incident_id IN (SELECT id FROM incidents WHERE parent_incident_id = ?)
+            ORDER BY timestamp ASC
+        `, [incident_id, incident_id]);
+        res.json(rows);
+    } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
 // Driver complete case
 app.post('/api/incidents/:id/complete', verifyToken, async (req, res) => {
     try {
@@ -694,8 +734,16 @@ io.on('connection', (socket) => {
     });
 
     // 4. Real-time Chat Messaging
-    socket.on('send_chat_message', ({ incident_id, sender, message, image }) => {
-        io.to(`incident_room_${incident_id}`).emit('new_chat_message', { sender, message, image, timestamp: new Date() });
+    socket.on('send_chat_message', async ({ incident_id, sender, message, image, clientId }) => {
+        try {
+            // Save to Database for persistence
+            await pool.query('INSERT INTO chat_messages (incident_id, sender, message, image) VALUES (?, ?, ?, ?)', [incident_id, sender, message, image || null]);
+            
+            // Broadcast to the room (include clientId so sender can avoid duplicate)
+            io.to(`incident_room_${incident_id}`).emit('new_chat_message', { sender, message, image, timestamp: new Date(), clientId });
+        } catch (e) {
+            console.error('[CHAT ERROR]', e);
+        }
     });
 });
 

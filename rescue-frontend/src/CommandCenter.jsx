@@ -69,7 +69,11 @@ function CommandCenter({ user, onLogout }) {
     });
 
     socket.on('new_chat_message', (msg) => {
-      setChatMessages(prev => [...prev, msg]);
+      setChatMessages(prev => {
+        // If we already have this message (via optimistic update or clientId match), skip it
+        if (msg.clientId && prev.some(m => m.clientId === msg.clientId)) return prev;
+        return [...prev, msg];
+      });
     });
 
     socket.on('admin_broadcast', (data) => {
@@ -107,8 +111,20 @@ function CommandCenter({ user, onLogout }) {
          setActiveMission(res.data);
          const roomId = res.data.parent_incident_id || res.data.id;
          socket.emit('join_incident_room', roomId);
+         fetchChatHistory(res.data.id);
       }
     } catch(e) { }
+  };
+
+  const fetchChatHistory = async (incidentId) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/incidents/${incidentId}/chat`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      setChatMessages(res.data);
+    } catch (e) {
+      console.error("Failed to fetch chat history", e);
+    }
   };
 
   const toggleOnline = () => {
@@ -147,9 +163,13 @@ function CommandCenter({ user, onLogout }) {
   const sendMessage = () => {
     if (!chatInput.trim() || !activeMission) return;
     const roomId = activeMission.parent_incident_id || activeMission.id;
-    socket.emit('send_chat_message', {
-      incident_id: roomId, sender: 'Staff', message: chatInput
-    });
+    const clientId = Math.random().toString(36).substring(7);
+    const msg = { incident_id: roomId, sender: 'Staff', message: chatInput, timestamp: new Date(), clientId };
+    
+    // Optimistic update
+    setChatMessages(prev => [...prev, msg]);
+    
+    socket.emit('send_chat_message', msg);
     setChatInput('');
   };
 
@@ -181,6 +201,7 @@ function CommandCenter({ user, onLogout }) {
                    setIncomingMission(null);
                    toast.success("✅ รับงานเรียบร้อย นำทางทันที!");
                    socket.emit('join_incident_room', incomingMission.parent_incident_id || incomingMission.incident_id);
+                   fetchChatHistory(incomingMission.incident_id);
                 } catch(e) {
                    toast.error('❌ ไม่สามารถรับงานได้: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์ขัดข้อง'));
                    setIncomingMission(null);

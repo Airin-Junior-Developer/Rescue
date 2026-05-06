@@ -89,6 +89,7 @@ function CitizenSOS() {
                   const hydratedIncident = { ...incident, driver_name: res.data.driver_name || incident.driver_name, driver_phone: res.data.driver_phone || incident.driver_phone };
                   setActiveIncident(hydratedIncident);
                   socket.emit('join_incident_room', incident.id);
+                  fetchChatHistory(incident.id);
               }
           }).catch(() => localStorage.removeItem('activeCitizenIncident'));
     }
@@ -99,7 +100,10 @@ function CitizenSOS() {
     });
 
     socket.on('new_chat_message', (msg) => {
-      setChatMessages(prev => [...prev, msg]);
+      setChatMessages(prev => {
+        if (msg.clientId && prev.some(m => m.clientId === msg.clientId)) return prev;
+        return [...prev, msg];
+      });
     });
 
     socket.on('mission_completed', () => {
@@ -116,6 +120,7 @@ function CitizenSOS() {
         const incident = { id: data.incident_id, assigned_user_id: data.driver_id, driver_name: data.driver_name, driver_phone: data.driver_phone };
         setActiveIncident(incident);
         localStorage.setItem('activeCitizenIncident', JSON.stringify(incident));
+        fetchChatHistory(data.incident_id);
     });
 
     socket.on('no_drivers', () => {
@@ -123,7 +128,16 @@ function CitizenSOS() {
         setIsSearching(false);
     });
 
-    return () => {
+    const fetchChatHistory = async (incidentId) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/citizen/incidents/${incidentId}/chat`);
+      setChatMessages(res.data);
+    } catch (e) {
+      console.error("Failed to fetch chat history", e);
+    }
+  };
+
+  return () => {
       socket.off('vehicle_location_updated');
       socket.off('new_chat_message');
       socket.off('mission_completed');
@@ -199,11 +213,19 @@ function CitizenSOS() {
   // --------------- CHAT LOGIC ---------------
   const sendMessage = () => {
     if (!chatInput.trim() || !activeIncident) return;
-    socket.emit('send_chat_message', {
+    const clientId = Math.random().toString(36).substring(7);
+    const msg = {
       incident_id: activeIncident.id,
       sender: 'Citizen',
-      message: chatInput
-    });
+      message: chatInput,
+      timestamp: new Date(),
+      clientId
+    };
+    
+    // Optimistic update
+    setChatMessages(prev => [...prev, msg]);
+    
+    socket.emit('send_chat_message', msg);
     setChatInput('');
   };
 
