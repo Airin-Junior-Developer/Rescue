@@ -255,14 +255,14 @@ function CitizenSOS() {
     return (
       <div style={{ textAlign: 'center', padding: '50px', fontFamily: 'sans-serif', background: '#0f172a', minHeight: '100vh', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
         <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png" alt="Rescue" style={{ width: '50px', marginBottom: '20px' }} />
-        <h2 style={{ color: '#f8fafc', marginBottom: '10px' }}>🚨 กรุณาเปิดใช้งานผ่านแอปพลิเคชัน LINE</h2>
+        <h2 style={{ color: '#f8fafc', marginBottom: '10px' }}>🚨 Please open via LINE App</h2>
         <p style={{ color: '#94a3b8', fontSize: '18px', maxWidth: '400px', lineHeight: '1.5' }}>
-          ระบบแจ้งเหตุกู้ภัยอัจฉริยะ (Smart Rescue) รองรับการใช้งานของประชาชนผ่าน <span style={{ color: '#00c300', fontWeight: 'bold' }}>LINE LIFF</span> เท่านั้นครับ
+          The Smart Rescue System is designed to be used exclusively through <span style={{ color: '#00c300', fontWeight: 'bold' }}>LINE LIFF</span>.
         </p>
         <div style={{ marginTop: '40px', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '15px' }}>
-          <p style={{ color: '#94a3b8', margin: '0 0 10px 0' }}>สำหรับเจ้าหน้าที่กู้ภัยและผู้ดูแลระบบ</p>
+          <p style={{ color: '#94a3b8', margin: '0 0 10px 0' }}>For Rescuers and Administrators</p>
           <Link to="/login" style={{ display: 'inline-block', padding: '10px 20px', background: '#3b82f6', color: '#fff', textDecoration: 'none', borderRadius: '8px', fontWeight: 'bold' }}>
-            เข้าสู่ระบบศูนย์บัญชาการ
+            Go to Command Center
           </Link>
         </div>
       </div>
