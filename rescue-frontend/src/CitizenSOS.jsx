@@ -28,6 +28,7 @@ function CitizenSOS() {
   // Registration Modal State
   const [showRegister, setShowRegister] = useState(false);
   const [registerPhoneInput, setRegisterPhoneInput] = useState('');
+  const chatEndRef = useRef(null);
 
   // SOS Hold Logic
   const [isHolding, setIsHolding] = useState(false);
@@ -161,6 +162,7 @@ function CitizenSOS() {
     const handleReconnect = () => {
       if (activeIncident) {
         socket.emit('join_incident_room', activeIncident.id);
+        fetchChatHistory(activeIncident.id);
       } else if (searchingIncidentId) {
         socket.emit('join_incident_room', searchingIncidentId);
       }
@@ -168,6 +170,10 @@ function CitizenSOS() {
     socket.on('connect', handleReconnect);
     return () => socket.off('connect', handleReconnect);
   }, [activeIncident, searchingIncidentId]);
+
+  useEffect(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   // --------------- SOS HOLD LOGIC ---------------
   const startHold = () => {
@@ -333,24 +339,37 @@ function CitizenSOS() {
                 Chat 💬
               </div>
            </div>
-           <div style={{ flex: 1, padding: '15px', overflowY: 'auto' }}>
+           <div style={{ flex: 1, padding: '15px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' }}>
               {chatMessages.map((m, i) => {
                  const isMe = m.sender === 'Citizen';
                  const isSystem = m.sender === 'System';
-                 const align = isSystem ? 'center' : (isMe ? 'right' : 'left');
-                 const bgColor = isSystem ? '#475569' : (isMe ? '#10b981' : '#3b82f6');
+                 const align = isSystem ? 'center' : (isMe ? 'flex-end' : 'flex-start');
+                 const bgColor = isSystem ? 'rgba(71, 85, 105, 0.6)' : (isMe ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #3b82f6, #2563eb)');
                  const senderName = isSystem ? '' : (isMe ? '' : (m.sender.startsWith('Staff:') ? m.sender.replace('Staff:', 'กู้ภัย: ') : 'เจ้าหน้าที่กู้ภัย'));
+                 const timeStr = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
 
                  return (
-                   <div key={i} style={{ marginBottom: '10px', textAlign: align }}>
-                     {!isMe && !isSystem && <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', marginLeft: '5px' }}>{senderName}</div>}
-                     <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: bgColor, color: '#fff', fontSize: isSystem ? '14px' : '16px' }}>
+                   <div key={i} style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', alignItems: align }}>
+                     {!isMe && !isSystem && <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px', marginLeft: '8px', fontWeight: 'bold' }}>{senderName}</div>}
+                     <div style={{ 
+                         display: 'inline-block', 
+                         padding: '10px 14px', 
+                         borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', 
+                         background: bgColor, 
+                         color: '#fff', 
+                         fontSize: isSystem ? '13px' : '15px',
+                         boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                         maxWidth: '85%',
+                         lineHeight: '1.4'
+                     }}>
                        {m.message}
-                       {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '5px' }} onClick={()=>window.open(m.image)}/></>}
-                     </span>
+                       {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '8px', border: '1px solid rgba(255,255,255,0.2)' }} onClick={()=>window.open(m.image)}/></>}
+                       {!isSystem && <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', marginTop: '4px', textAlign: 'right' }}>{timeStr}</div>}
+                     </div>
                    </div>
                  );
               })}
+              <div ref={chatEndRef} />
            </div>
            <div style={{ padding: '10px 15px', display: 'flex', gap: '10px', alignItems: 'center' }}>
               <label style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

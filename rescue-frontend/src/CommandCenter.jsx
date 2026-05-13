@@ -29,6 +29,7 @@ function CommandCenter({ user, onLogout }) {
   // Chat
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef(null);
 
   const gpsInterval = useRef(null);
   const mapRef = useRef(null);
@@ -96,11 +97,16 @@ function CommandCenter({ user, onLogout }) {
     const handleReconnect = () => {
       if (activeMission) {
         socket.emit('join_incident_room', activeMission.parent_incident_id || activeMission.id);
+        fetchChatHistory(activeMission.id);
       }
     };
     socket.on('connect', handleReconnect);
     return () => socket.off('connect', handleReconnect);
   }, [activeMission]);
+
+  useEffect(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   // Update Redis Location repeatedly
   useEffect(() => {
@@ -277,26 +283,39 @@ function CommandCenter({ user, onLogout }) {
               <a href={`tel:${activeMission.citizen_phone}`} className="btn" style={{ background: '#3b82f6', color: '#fff', textDecoration: 'none' }}>Call Now</a>
            </div>
            
-           <div style={{ flex: 1, padding: '15px', overflowY: 'auto' }}>
+           <div style={{ flex: 1, padding: '15px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }}>
               {chatMessages.map((m, i) => {
                 const isSystem = m.sender === 'System';
                 const isCitizen = m.sender === 'Citizen';
                 // Consider it 'me' if it matches my exact Staff name, or if it's the old generic 'Staff' (for backward compatibility, assume it's me if no other rescuer is around, though ideally we check exact match)
                 const isMe = m.sender === `Staff:${user.username}` || (m.sender === 'Staff' && !isSystem && !isCitizen); 
-                const align = isSystem ? 'center' : (isMe ? 'right' : 'left');
-                const bgColor = isSystem ? '#475569' : (isMe ? '#3b82f6' : (isCitizen ? '#10b981' : '#f59e0b'));
+                const align = isSystem ? 'center' : (isMe ? 'flex-end' : 'flex-start');
+                const bgColor = isSystem ? 'rgba(71, 85, 105, 0.6)' : (isMe ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : (isCitizen ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #f59e0b, #d97706)'));
                 const senderName = isSystem ? '' : (isMe ? '' : (isCitizen ? 'ผู้แจ้งเหตุ' : m.sender.replace('Staff:', '')));
+                const timeStr = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
 
                 return (
-                  <div key={i} style={{ marginBottom: '10px', textAlign: align }}>
-                    {!isMe && !isSystem && <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', marginLeft: '5px' }}>{senderName}</div>}
-                    <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: bgColor, color: '#fff', fontSize: isSystem ? '14px' : '16px' }}>
+                  <div key={i} style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', alignItems: align }}>
+                    {!isMe && !isSystem && <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px', marginLeft: '8px', fontWeight: 'bold' }}>{senderName}</div>}
+                    <div style={{ 
+                        display: 'inline-block', 
+                        padding: '10px 14px', 
+                        borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', 
+                        background: bgColor, 
+                        color: '#fff', 
+                        fontSize: isSystem ? '13px' : '15px',
+                        boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                        maxWidth: '85%',
+                        lineHeight: '1.4'
+                    }}>
                       {m.message}
-                      {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '5px' }} onClick={()=>window.open(m.image)}/></>}
-                    </span>
+                      {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '8px', border: '1px solid rgba(255,255,255,0.2)' }} onClick={()=>window.open(m.image)}/></>}
+                      {!isSystem && <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', marginTop: '4px', textAlign: 'right' }}>{timeStr}</div>}
+                    </div>
                   </div>
                 );
               })}
+              <div ref={chatEndRef} />
            </div>
            <div style={{ padding: '10px 15px', display: 'flex', gap: '10px' }}>
               <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="พิมพ์ข้อความถึงผู้แจ้งเหตุ..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: 'none', outline: 'none' }} />
