@@ -738,6 +738,7 @@ io.on('connection', (socket) => {
 
         // Broadcast directly to Citizen who is waiting in `incident_room_123`
         if (active_incident_id) {
+            socket.join(`incident_room_${active_incident_id}`);
             io.to(`incident_room_${active_incident_id}`).emit('vehicle_location_updated', { latitude, longitude });
         }
     });
@@ -752,6 +753,9 @@ io.on('connection', (socket) => {
     // 4. Real-time Chat Messaging
     socket.on('send_chat_message', async ({ incident_id, sender, message, image, clientId }) => {
         try {
+            // Failsafe: Ensure sender is in the room
+            socket.join(`incident_room_${incident_id}`);
+            
             // Save to Database for persistence
             await pool.query('INSERT INTO chat_messages (incident_id, sender, message, image) VALUES (?, ?, ?, ?)', [incident_id, sender, message, image || null]);
             
