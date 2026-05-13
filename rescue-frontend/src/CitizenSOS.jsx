@@ -156,6 +156,19 @@ function CitizenSOS() {
     };
   }, []);
 
+  // Handle socket reconnection (e.g. Railway drops idle connection)
+  useEffect(() => {
+    const handleReconnect = () => {
+      if (activeIncident) {
+        socket.emit('join_incident_room', activeIncident.id);
+      } else if (searchingIncidentId) {
+        socket.emit('join_incident_room', searchingIncidentId);
+      }
+    };
+    socket.on('connect', handleReconnect);
+    return () => socket.off('connect', handleReconnect);
+  }, [activeIncident, searchingIncidentId]);
+
   // --------------- SOS HOLD LOGIC ---------------
   const startHold = () => {
     if (!citizenPhone.trim()) {

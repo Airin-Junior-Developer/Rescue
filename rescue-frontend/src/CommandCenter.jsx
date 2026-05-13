@@ -91,6 +91,17 @@ function CommandCenter({ user, onLogout }) {
     };
   }, []);
 
+  // Handle socket reconnection
+  useEffect(() => {
+    const handleReconnect = () => {
+      if (activeMission) {
+        socket.emit('join_incident_room', activeMission.parent_incident_id || activeMission.id);
+      }
+    };
+    socket.on('connect', handleReconnect);
+    return () => socket.off('connect', handleReconnect);
+  }, [activeMission]);
+
   // Update Redis Location repeatedly
   useEffect(() => {
       if (isOnline || activeMission) {
