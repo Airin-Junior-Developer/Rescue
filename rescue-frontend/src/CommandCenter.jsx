@@ -270,8 +270,8 @@ function CommandCenter({ user, onLogout }) {
               {chatMessages.map((m, i) => {
                 const isSystem = m.sender === 'System';
                 const isCitizen = m.sender === 'Citizen';
-                // Consider it 'me' if it matches my exact Staff name, or if it has my clientId (optimistic), or if it's the old generic 'Staff' (for backward compatibility, assume it's me if no other rescuer is around, though ideally we check exact match)
-                const isMe = m.sender === `Staff:${user.username}` || (m.clientId !== undefined && !isCitizen && !isSystem) || (m.sender === 'Staff' && !isSystem && !isCitizen); 
+                // Consider it 'me' if it matches my exact Staff name, or if it's the old generic 'Staff' (for backward compatibility, assume it's me if no other rescuer is around, though ideally we check exact match)
+                const isMe = m.sender === `Staff:${user.username}` || (m.sender === 'Staff' && !isSystem && !isCitizen); 
                 const align = isSystem ? 'center' : (isMe ? 'right' : 'left');
                 const bgColor = isSystem ? '#475569' : (isMe ? '#3b82f6' : (isCitizen ? '#10b981' : '#f59e0b'));
                 const senderName = isSystem ? '' : (isMe ? '' : (isCitizen ? 'ผู้แจ้งเหตุ' : m.sender.replace('Staff:', '')));

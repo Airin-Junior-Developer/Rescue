@@ -322,7 +322,7 @@ function CitizenSOS() {
            </div>
            <div style={{ flex: 1, padding: '15px', overflowY: 'auto' }}>
               {chatMessages.map((m, i) => {
-                 const isMe = m.sender === 'Citizen' || m.clientId;
+                 const isMe = m.sender === 'Citizen';
                  const isSystem = m.sender === 'System';
                  const align = isSystem ? 'center' : (isMe ? 'right' : 'left');
                  const bgColor = isSystem ? '#475569' : (isMe ? '#10b981' : '#3b82f6');
