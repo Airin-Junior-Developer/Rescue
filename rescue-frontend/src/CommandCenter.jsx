@@ -164,7 +164,7 @@ function CommandCenter({ user, onLogout }) {
     if (!chatInput.trim() || !activeMission) return;
     const roomId = activeMission.parent_incident_id || activeMission.id;
     const clientId = Math.random().toString(36).substring(7);
-    const msg = { incident_id: roomId, sender: 'Staff', message: chatInput, timestamp: new Date(), clientId };
+    const msg = { incident_id: roomId, sender: `Staff:${user.username}`, message: chatInput, timestamp: new Date(), clientId };
     
     // Optimistic update
     setChatMessages(prev => [...prev, msg]);
@@ -267,14 +267,25 @@ function CommandCenter({ user, onLogout }) {
            </div>
            
            <div style={{ flex: 1, padding: '15px', overflowY: 'auto' }}>
-              {chatMessages.map((m, i) => (
-                <div key={i} style={{ marginBottom: '10px', textAlign: m.sender === 'Staff' ? 'right' : 'left' }}>
-                  <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: m.sender === 'Staff' ? '#3b82f6' : '#ef4444', color: '#fff' }}>
-                    {m.message}
-                    {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '5px' }} onClick={()=>window.open(m.image)}/></>}
-                  </span>
-                </div>
-              ))}
+              {chatMessages.map((m, i) => {
+                const isSystem = m.sender === 'System';
+                const isCitizen = m.sender === 'Citizen';
+                // Consider it 'me' if it matches my exact Staff name, or if it has my clientId (optimistic), or if it's the old generic 'Staff' (for backward compatibility, assume it's me if no other rescuer is around, though ideally we check exact match)
+                const isMe = m.sender === `Staff:${user.username}` || (m.clientId !== undefined && !isCitizen && !isSystem) || (m.sender === 'Staff' && !isSystem && !isCitizen); 
+                const align = isSystem ? 'center' : (isMe ? 'right' : 'left');
+                const bgColor = isSystem ? '#475569' : (isMe ? '#3b82f6' : (isCitizen ? '#10b981' : '#f59e0b'));
+                const senderName = isSystem ? '' : (isMe ? '' : (isCitizen ? 'ผู้แจ้งเหตุ' : m.sender.replace('Staff:', '')));
+
+                return (
+                  <div key={i} style={{ marginBottom: '10px', textAlign: align }}>
+                    {!isMe && !isSystem && <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', marginLeft: '5px' }}>{senderName}</div>}
+                    <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: bgColor, color: '#fff', fontSize: isSystem ? '14px' : '16px' }}>
+                      {m.message}
+                      {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '5px' }} onClick={()=>window.open(m.image)}/></>}
+                    </span>
+                  </div>
+                );
+              })}
            </div>
            <div style={{ padding: '10px 15px', display: 'flex', gap: '10px' }}>
               <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="พิมพ์ข้อความถึงผู้แจ้งเหตุ..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: 'none', outline: 'none' }} />

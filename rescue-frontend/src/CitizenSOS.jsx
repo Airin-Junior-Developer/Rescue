@@ -309,14 +309,23 @@ function CitizenSOS() {
               </div>
            </div>
            <div style={{ flex: 1, padding: '15px', overflowY: 'auto' }}>
-              {chatMessages.map((m, i) => (
-                <div key={i} style={{ marginBottom: '10px', textAlign: m.sender === 'Citizen' ? 'right' : 'left' }}>
-                  <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: m.sender === 'Citizen' ? '#ef4444' : '#3b82f6', color: '#fff' }}>
-                    {m.message}
-                    {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', marginTop: '5px' }}/></>}
-                  </span>
-                </div>
-              ))}
+              {chatMessages.map((m, i) => {
+                 const isMe = m.sender === 'Citizen' || m.clientId;
+                 const isSystem = m.sender === 'System';
+                 const align = isSystem ? 'center' : (isMe ? 'right' : 'left');
+                 const bgColor = isSystem ? '#475569' : (isMe ? '#10b981' : '#3b82f6');
+                 const senderName = isSystem ? '' : (isMe ? '' : (m.sender.startsWith('Staff:') ? m.sender.replace('Staff:', 'กู้ภัย: ') : 'เจ้าหน้าที่กู้ภัย'));
+
+                 return (
+                   <div key={i} style={{ marginBottom: '10px', textAlign: align }}>
+                     {!isMe && !isSystem && <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', marginLeft: '5px' }}>{senderName}</div>}
+                     <span style={{ display: 'inline-block', padding: '8px 12px', borderRadius: '15px', background: bgColor, color: '#fff', fontSize: isSystem ? '14px' : '16px' }}>
+                       {m.message}
+                       {m.image && <><br/><img src={m.image} alt="evidence" style={{ maxWidth: '180px', borderRadius: '8px', cursor: 'pointer', marginTop: '5px' }} onClick={()=>window.open(m.image)}/></>}
+                     </span>
+                   </div>
+                 );
+              })}
            </div>
            <div style={{ padding: '10px 15px', display: 'flex', gap: '10px', alignItems: 'center' }}>
               <label style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
