@@ -177,8 +177,8 @@ function CitizenSOS() {
 
   const handleRegisterPhone = async (e) => {
       e.preventDefault();
-      if (!registerPhoneInput || registerPhoneInput.length < 9) {
-          toast.error('กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (อย่างน้อย 9 หลัก)');
+      if (!/^0\d{8,9}$/.test(registerPhoneInput)) {
+          toast.error('กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (ต้องขึ้นต้นด้วย 0 และมี 9-10 หลัก)');
           return;
       }
       try {
@@ -407,10 +407,11 @@ function CitizenSOS() {
                       <input 
                           type="tel"
                           value={registerPhoneInput}
-                          onChange={(e) => setRegisterPhoneInput(e.target.value)}
+                          onChange={(e) => setRegisterPhoneInput(e.target.value.replace(/\D/g, ''))}
                           placeholder="เบอร์โทรศัพท์ (เช่น 0812345678)"
                           style={{ width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: '18px', textAlign: 'center', marginBottom: '20px' }}
                           required
+                          maxLength="10"
                       />
                       <button type="submit" style={{ width: '100%', background: '#10b981', color: 'white', border: 'none', padding: '15px', borderRadius: '8px', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>
                           บันทึกข้อมูลและเข้าสู่ระบบ

@@ -34,6 +34,10 @@ function RescuerRegister() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    if (!/^0\d{8,9}$/.test(phone)) {
+        toast.error('กรุณากรอกเบอร์โทรศัพท์ให้ถูกต้อง (ต้องขึ้นต้นด้วย 0 และมี 9-10 หลัก)');
+        return;
+    }
     try {
       const res = await axios.post(`${API_URL}/api/rescuers/register`, {
         username,
@@ -74,7 +78,7 @@ function RescuerRegister() {
           </div>
           <div style={{ marginBottom: '30px' }}>
             <label style={{ display: 'block', marginBottom: '8px', color: '#cbd5e1' }}>เบอร์โทรศัพท์ติดต่อ</label>
-            <input value={phone} onChange={e=>setPhone(e.target.value)} required style={{width:'100%'}} placeholder="08x-xxx-xxxx" />
+            <input value={phone} onChange={e=>setPhone(e.target.value.replace(/\D/g, ''))} required style={{width:'100%'}} placeholder="08x-xxx-xxxx" type="tel" maxLength="10" />
           </div>
           
           <button type="submit" className="btn" style={{width:'100%', background:'#10b981', color:'white', fontWeight:'bold', border:'none', padding:'12px', borderRadius:'8px', cursor:'pointer'}}>
