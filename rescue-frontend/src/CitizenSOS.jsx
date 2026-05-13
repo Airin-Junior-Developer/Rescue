@@ -53,14 +53,8 @@ function CitizenSOS() {
       });
     }
 
-    // Initialize LINE LIFF
-    liff.init({ liffId: '2009894409-w2sSn3rf' })
-      .then(() => {
-        if (!liff.isInClient()) {
-            setIsInLine(false);
-            return;
-        }
-
+    const handleLiffAuth = () => {
+        setIsInLine(true);
         if (liff.isLoggedIn()) {
           liff.getProfile().then(profile => {
             setLineUid(profile.userId);
@@ -79,6 +73,16 @@ function CitizenSOS() {
           // ถ้าเปิดในบราวเซอร์ปกติ แล้วยังไม่ได้ล็อกอิน ให้เด้งไปหน้าล็อกอินของ LINE
           liff.login();
         }
+    };
+
+    // Initialize LINE LIFF
+    liff.init({ liffId: '2009894409-w2sSn3rf' })
+      .then(() => {
+        if (!liff.isInClient() && !liff.isLoggedIn()) {
+            setIsInLine(false);
+            return;
+        }
+        handleLiffAuth();
       })
       .catch(err => console.error("LIFF Init failed", err));
 
@@ -264,6 +268,14 @@ function CitizenSOS() {
           <Link to="/login" style={{ display: 'inline-block', padding: '10px 20px', background: '#3b82f6', color: '#fff', textDecoration: 'none', borderRadius: '8px', fontWeight: 'bold' }}>
             Go to Command Center
           </Link>
+          <div style={{ marginTop: '20px' }}>
+            <button onClick={() => {
+                setIsInLine(true);
+                liff.login();
+            }} style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>
+              Test in Browser (LINE Login)
+            </button>
+          </div>
         </div>
       </div>
     );
