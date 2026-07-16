@@ -762,8 +762,13 @@ io.on('connection', (socket) => {
     // authenticate with the same JWT they already use for REST calls.
     socket.on('join_incident_room', async ({ incident_id, citizen_token, staff_token }) => {
         if (citizen_token) {
-            const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
-            if (rows.length === 0 || rows[0].citizen_token !== citizen_token) return;
+            try {
+                const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
+                if (rows.length === 0 || rows[0].citizen_token !== citizen_token) return;
+            } catch (e) {
+                console.error('[JOIN_ROOM ERROR]', e);
+                return;
+            }
         } else if (staff_token) {
             try {
                 jwt.verify(staff_token, JWT_SECRET);
