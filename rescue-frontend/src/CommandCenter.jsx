@@ -96,7 +96,7 @@ function CommandCenter({ user, onLogout }) {
   useEffect(() => {
     const handleReconnect = () => {
       if (activeMission) {
-        socket.emit('join_incident_room', activeMission.parent_incident_id || activeMission.id);
+        socket.emit('join_incident_room', { incident_id: activeMission.parent_incident_id || activeMission.id, staff_token: localStorage.getItem('token') });
         fetchChatHistory(activeMission.id);
       }
     };
@@ -127,7 +127,7 @@ function CommandCenter({ user, onLogout }) {
       if (res.data) {
          setActiveMission(res.data);
          const roomId = res.data.parent_incident_id || res.data.id;
-         socket.emit('join_incident_room', roomId);
+         socket.emit('join_incident_room', { incident_id: roomId, staff_token: localStorage.getItem('token') });
          fetchChatHistory(res.data.id);
       }
     } catch(e) { }
@@ -217,7 +217,7 @@ function CommandCenter({ user, onLogout }) {
                    setActiveMission(missionData);
                    setIncomingMission(null);
                    toast.success("✅ รับงานเรียบร้อย นำทางทันที!");
-                   socket.emit('join_incident_room', incomingMission.parent_incident_id || incomingMission.incident_id);
+                   socket.emit('join_incident_room', { incident_id: incomingMission.parent_incident_id || incomingMission.incident_id, staff_token: localStorage.getItem('token') });
                    fetchChatHistory(incomingMission.incident_id);
                 } catch(e) {
                    toast.error('❌ ไม่สามารถรับงานได้: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์ขัดข้อง'));
