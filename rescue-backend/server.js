@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const mysql = require('mysql2/promise');
+const crypto = require('crypto');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -72,6 +73,9 @@ pool.query('ALTER TABLE incidents ADD COLUMN citizen_phone VARCHAR(20) NULL').ca
 
 // Auto-migrate cancel reason
 pool.query('ALTER TABLE incidents ADD COLUMN cancel_reason VARCHAR(255) NULL').catch(()=>{});
+
+// Auto-migrate citizen token for per-incident access control
+pool.query('ALTER TABLE incidents ADD COLUMN citizen_token VARCHAR(64) NULL').catch(()=>{});
 
 // Auto-migrate is_approved for Rescuer Approval
 pool.query('ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT TRUE').catch(()=>{});
@@ -260,9 +264,10 @@ app.post('/api/incidents', sosLimiter, async (req, res) => {
         let rescuerPhone = null;
 
         // AUTO-ASSIGN: Create Pending Case ALWAYS (Even if no one is nearby right now)
+        const citizen_token = crypto.randomUUID();
         const [result] = await pool.query(
-            'INSERT INTO incidents (details, latitude, longitude, status, citizen_phone) VALUES (?, ?, ?, ?, ?)',
-            [details || 'SOS via App', latitude, longitude, 'Pending', citizen_phone]
+            'INSERT INTO incidents (details, latitude, longitude, status, citizen_phone, citizen_token) VALUES (?, ?, ?, ?, ?, ?)',
+            [details || 'SOS via App', latitude, longitude, 'Pending', citizen_phone, citizen_token]
         );
         const incident_id = result.insertId;
 
@@ -271,7 +276,7 @@ app.post('/api/incidents', sosLimiter, async (req, res) => {
             broadcastOffer(incident_id, nearbyDriverIds, { details, latitude, longitude, citizen_phone });
         }
 
-        res.status(201).json({ message: 'Searching for rescuer', incident_id });
+        res.status(201).json({ message: 'Searching for rescuer', incident_id, citizen_token });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -364,8 +369,8 @@ app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
 
         const details = `[🚨 BACKUP] ${p.details}`;
         const [result] = await pool.query(
-            'INSERT INTO incidents (details, latitude, longitude, status, citizen_phone, parent_incident_id) VALUES (?, ?, ?, ?, ?, ?)',
-            [details, p.latitude, p.longitude, 'Pending', p.citizen_phone, parent_id]
+            'INSERT INTO incidents (details, latitude, longitude, status, citizen_phone, parent_incident_id, citizen_token) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [details, p.latitude, p.longitude, 'Pending', p.citizen_phone, parent_id, p.citizen_token]
         );
         const incident_id = result.insertId;
 
