@@ -7,10 +7,12 @@ const { Server } = require('socket.io');
 const redis = require('redis');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const { sosLimiter, loginLimiter, publicWriteLimiter } = require('./rateLimiters');
 require('dotenv').config();
 
 
 const app = express();
+app.set('trust proxy', 1); // Railway sits in front of this server; without this, rate limiting keys off the proxy's IP for every request
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
 
@@ -175,7 +177,7 @@ setInterval(async () => {
 }, 5000);
 
 // 1. Auth API
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
     try {
         const [users] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
@@ -210,7 +212,7 @@ const verifyToken = (req, res, next) => {
 };
 
 // Citizen LINE Auth
-app.post('/api/citizen/auth', async (req, res) => {
+app.post('/api/citizen/auth', publicWriteLimiter, async (req, res) => {
     try {
         const { line_uid, display_name } = req.body;
         if (!line_uid) return res.status(400).json({ error: 'line_uid required' });
@@ -227,7 +229,7 @@ app.post('/api/citizen/auth', async (req, res) => {
 });
 
 // Citizen Register Phone (Standalone API)
-app.post('/api/citizen/register-phone', async (req, res) => {
+app.post('/api/citizen/register-phone', publicWriteLimiter, async (req, res) => {
     try {
         const { line_uid, phone } = req.body;
         if (!line_uid || !phone) return res.status(400).json({ error: 'Missing data' });
@@ -237,7 +239,7 @@ app.post('/api/citizen/register-phone', async (req, res) => {
 });
 
 // 2. Incident API (Auto-Dispatch GRAB-Style)
-app.post('/api/incidents', async (req, res) => {
+app.post('/api/incidents', sosLimiter, async (req, res) => {
     try {
         let { details, latitude, longitude, citizen_phone, line_uid } = req.body;
         latitude = parseFloat(latitude); longitude = parseFloat(longitude);
@@ -564,7 +566,7 @@ app.post('/api/admin/rescuers/bulk', verifyToken, async (req, res) => {
 });
 
 // Driver Self-Registration (Public API)
-app.post('/api/rescuers/register', async (req, res) => {
+app.post('/api/rescuers/register', publicWriteLimiter, async (req, res) => {
     try {
         const { username, password, foundation_id, phone } = req.body;
         if (!username || !password || !foundation_id) return res.status(400).json({ error: 'Missing required fields' });
