@@ -17,7 +17,7 @@
 - Rate limits (per IP): `POST /api/incidents` 5 req / 10 min; `POST /api/login` 10 req / 15 min; `POST /api/citizen/auth`, `POST /api/citizen/register-phone`, `POST /api/rescuers/register` 20 req / 15 min.
 - Demo accounts to purge from the DB: `adminA`, `rescueA1`, `adminB`, `rescueB1` (all share password `"password"`).
 - Frontend has no automated test framework installed — frontend tasks are verified manually in the browser against the local dev stack (`docker-compose up -d` + `npm run dev` per `TROUBLESHOOTING.txt`), per the "test in browser before claiming done" rule for UI changes.
-- Every new/modified backend route or socket handler must keep its existing response shape for success cases — only the rejection paths (CORS error, 403, 429, refused socket join) are new.
+- Every new/modified backend route or socket handler must keep its existing response shape/fields for anything **unrelated** to the token mechanism — do not gratuitously rename or restructure fields while adding auth checks. The two changes the token mechanism itself explicitly requires are exempt and must be made exactly as specified: `POST /api/incidents` (Task 5) adds a new `citizen_token` field to its success response; `join_incident_room` (Task 7) changes its payload from a bare `incident_id` to `{ incident_id, citizen_token }` / `{ incident_id, staff_token }`. Both frontend tasks (8, 9) must match these shapes exactly. Rejection paths (CORS error, 403, 429, refused socket join) are new by design.
 
 ---
 
