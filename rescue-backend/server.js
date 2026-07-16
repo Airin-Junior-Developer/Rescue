@@ -9,30 +9,22 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { sosLimiter, loginLimiter, publicWriteLimiter } = require('./rateLimiters');
 const { getJwtSecret } = require('./jwtSecret');
+const { isAllowedOrigin } = require('./corsConfig');
 require('dotenv').config();
 
+
+const corsOriginHandler = (origin, callback) => {
+  if (isAllowedOrigin(origin)) return callback(null, true);
+  callback(new Error('Not allowed by CORS'));
+};
 
 const app = express();
 app.set('trust proxy', 1); // Railway sits in front of this server; without this, rate limiting keys off the proxy's IP for every request
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
+const io = new Server(server, { cors: { origin: corsOriginHandler, methods: ['GET', 'POST'] } });
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3002',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:3002',
-];
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
-    // Allow all Vercel deployments and localhost
-    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.railway.app')) {
-      return callback(null, true);
-    }
-    callback(null, true); // Allow all for now during testing
-  },
+  origin: corsOriginHandler,
   credentials: true
 }));
 app.use(express.json());
