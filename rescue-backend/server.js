@@ -630,10 +630,18 @@ app.get('/api/incidents/:id/chat', verifyToken, async (req, res) => {
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// Citizen get chat history (public/liff protected by incident logic)
+// Citizen get chat history (protected by per-incident citizen token)
 app.get('/api/citizen/incidents/:id/chat', async (req, res) => {
     try {
         const incident_id = req.params.id;
+        const { token } = req.query;
+        if (!token) return res.status(403).json({ error: 'Unauthorized' });
+
+        const [incidentRows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
+        if (incidentRows.length === 0 || incidentRows[0].citizen_token !== token) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
         const [rows] = await pool.query(`
             SELECT * FROM chat_messages 
             WHERE incident_id = ? 
@@ -683,12 +691,17 @@ app.post('/api/incidents/:id/complete', verifyToken, async (req, res) => {
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// Citizen fetch status API
+// Citizen fetch status API (protected by per-incident citizen token)
 app.get('/api/incidents/status/:id', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT i.status, u.username as driver_name, u.phone as driver_phone FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.id = ?', [req.params.id]);
-        if (rows.length > 0) res.json({ status: rows[0].status, driver_name: rows[0].driver_name, driver_phone: rows[0].driver_phone });
-        else res.status(404).json({ error: 'Not found' });
+        const { token } = req.query;
+        if (!token) return res.status(403).json({ error: 'Unauthorized' });
+
+        const [rows] = await pool.query('SELECT i.status, i.citizen_token, u.username as driver_name, u.phone as driver_phone FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.id = ?', [req.params.id]);
+        if (rows.length === 0 || rows[0].citizen_token !== token) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        res.json({ status: rows[0].status, driver_name: rows[0].driver_name, driver_phone: rows[0].driver_phone });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
