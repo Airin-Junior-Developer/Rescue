@@ -758,7 +758,21 @@ io.on('connection', (socket) => {
 
 
     // 3. Citizen / Worker joins private Chat & GPS Tracker Room
-    socket.on('join_incident_room', (incident_id) => {
+    // Citizens authenticate with their per-incident citizen_token; drivers/staff
+    // authenticate with the same JWT they already use for REST calls.
+    socket.on('join_incident_room', async ({ incident_id, citizen_token, staff_token }) => {
+        if (citizen_token) {
+            const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
+            if (rows.length === 0 || rows[0].citizen_token !== citizen_token) return;
+        } else if (staff_token) {
+            try {
+                jwt.verify(staff_token, JWT_SECRET);
+            } catch (e) {
+                return;
+            }
+        } else {
+            return;
+        }
         socket.join(`incident_room_${incident_id}`);
         console.log(`User joined incident tracking room ${incident_id}`);
     });
