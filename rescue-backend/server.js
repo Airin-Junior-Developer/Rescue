@@ -8,6 +8,7 @@ const redis = require('redis');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { sosLimiter, loginLimiter, publicWriteLimiter } = require('./rateLimiters');
+const { getJwtSecret } = require('./jwtSecret');
 require('dotenv').config();
 
 
@@ -36,7 +37,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const JWT_SECRET = process.env.JWT_SECRET || 'rescue_super_secret_key';
+const JWT_SECRET = getJwtSecret();
 
 // Helper: Send LINE Push Message to a specific user
 async function sendLinePush(lineUid, message) {
