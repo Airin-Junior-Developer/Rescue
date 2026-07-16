@@ -36,6 +36,8 @@ function CitizenSOS() {
   const holdTimerRef = useRef(null);
   const progressTimerRef = useRef(null);
 
+  const citizenTokenRef = useRef(null);
+
   // Tracking Screen State
   const [activeIncident, setActiveIncident] = useState(null);
   const [rescuerLoc, setRescuerLoc] = useState(null);
@@ -91,7 +93,8 @@ function CitizenSOS() {
     const saved = localStorage.getItem('activeCitizenIncident');
     if (saved) {
        const incident = JSON.parse(saved);
-       axios.get(`${API_URL}/api/incidents/status/${incident.id}`)
+       citizenTokenRef.current = incident.citizen_token;
+       axios.get(`${API_URL}/api/incidents/status/${incident.id}`, { params: { token: incident.citizen_token } })
           .then(res => {
               if (res.data.status === 'Resolved' || res.data.status === 'Completed') {
                   localStorage.removeItem('activeCitizenIncident');
@@ -99,8 +102,8 @@ function CitizenSOS() {
                   // Merge API missing data like driver_phone into the object if needed
                   const hydratedIncident = { ...incident, driver_name: res.data.driver_name || incident.driver_name, driver_phone: res.data.driver_phone || incident.driver_phone };
                   setActiveIncident(hydratedIncident);
-                  socket.emit('join_incident_room', incident.id);
-                  fetchChatHistory(incident.id);
+                  socket.emit('join_incident_room', { incident_id: incident.id, citizen_token: incident.citizen_token });
+                  fetchChatHistory(incident.id, incident.citizen_token);
               }
           }).catch(() => localStorage.removeItem('activeCitizenIncident'));
     }
@@ -128,10 +131,10 @@ function CitizenSOS() {
     socket.on('driver_assigned', (data) => {
         toast.success("✅ กู้ภัยกดรับงานแล้ว! ติดตามรถได้เลย");
         setIsSearching(false);
-        const incident = { id: data.incident_id, assigned_user_id: data.driver_id, driver_name: data.driver_name, driver_phone: data.driver_phone };
+        const incident = { id: data.incident_id, assigned_user_id: data.driver_id, driver_name: data.driver_name, driver_phone: data.driver_phone, citizen_token: citizenTokenRef.current };
         setActiveIncident(incident);
         localStorage.setItem('activeCitizenIncident', JSON.stringify(incident));
-        fetchChatHistory(data.incident_id);
+        fetchChatHistory(data.incident_id, citizenTokenRef.current);
     });
 
     socket.on('no_drivers', () => {
@@ -139,9 +142,9 @@ function CitizenSOS() {
         setIsSearching(false);
     });
 
-    const fetchChatHistory = async (incidentId) => {
+    const fetchChatHistory = async (incidentId, token) => {
     try {
-      const res = await axios.get(`${API_URL}/api/citizen/incidents/${incidentId}/chat`);
+      const res = await axios.get(`${API_URL}/api/citizen/incidents/${incidentId}/chat`, { params: { token } });
       setChatMessages(res.data);
     } catch (e) {
       console.error("Failed to fetch chat history", e);
@@ -161,10 +164,10 @@ function CitizenSOS() {
   useEffect(() => {
     const handleReconnect = () => {
       if (activeIncident) {
-        socket.emit('join_incident_room', activeIncident.id);
-        fetchChatHistory(activeIncident.id);
+        socket.emit('join_incident_room', { incident_id: activeIncident.id, citizen_token: activeIncident.citizen_token });
+        fetchChatHistory(activeIncident.id, activeIncident.citizen_token);
       } else if (searchingIncidentId) {
-        socket.emit('join_incident_room', searchingIncidentId);
+        socket.emit('join_incident_room', { incident_id: searchingIncidentId, citizen_token: citizenTokenRef.current });
       }
     };
     socket.on('connect', handleReconnect);
@@ -229,9 +232,10 @@ function CitizenSOS() {
         details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone, line_uid: lineUid
       });
       setSearchingIncidentId(res.data.incident_id);
-      
+      citizenTokenRef.current = res.data.citizen_token;
+
       // Join the private socket room to wait for driver_assigned matching event!
-      socket.emit('join_incident_room', res.data.incident_id);
+      socket.emit('join_incident_room', { incident_id: res.data.incident_id, citizen_token: res.data.citizen_token });
 
     } catch (e) {
       toast.error('❌ ค้นหาล้มเหลว: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์มีปัญหา'));
