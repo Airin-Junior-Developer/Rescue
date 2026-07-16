@@ -10,6 +10,7 @@ const bcrypt = require('bcrypt');
 const { sosLimiter, loginLimiter, publicWriteLimiter } = require('./rateLimiters');
 const { getJwtSecret } = require('./jwtSecret');
 const { isAllowedOrigin } = require('./corsConfig');
+const { verifyPassword } = require('./auth');
 require('dotenv').config();
 
 
@@ -180,7 +181,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
                 return res.status(403).json({ error: 'บัญชีของคุณอยู่ระหว่างการรออนุมัติจากผู้ดูแลระบบ' });
             }
 
-            const isMatch = user.password.startsWith('$2b$') ? await bcrypt.compare(password, user.password) : password === user.password;
+            const isMatch = await verifyPassword(password, user.password);
             
             if (isMatch) {
                 const token = jwt.sign({ id: user.id, role: user.role, foundation_id: user.foundation_id }, JWT_SECRET, { expiresIn: '12h' });
