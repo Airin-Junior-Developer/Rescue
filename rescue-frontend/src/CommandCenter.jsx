@@ -113,7 +113,7 @@ function CommandCenter({ user, onLogout }) {
       if (isOnline || activeMission) {
           const roomId = activeMission?.parent_incident_id || activeMission?.id;
           socket.emit('update_vehicle_location', {
-              vehicle_id: user.id, latitude: lat, longitude: lng, active_incident_id: roomId
+              vehicle_id: user.id, latitude: lat, longitude: lng, active_incident_id: roomId, staff_token: localStorage.getItem('token')
           });
       }
   }, [lat, lng, isOnline, activeMission]);
@@ -181,7 +181,7 @@ function CommandCenter({ user, onLogout }) {
     if (!chatInput.trim() || !activeMission) return;
     const roomId = activeMission.parent_incident_id || activeMission.id;
     const clientId = Math.random().toString(36).substring(7);
-    const msg = { incident_id: roomId, sender: `Staff:${user.username}`, message: chatInput, timestamp: new Date(), clientId };
+    const msg = { incident_id: roomId, sender: `Staff:${user.username}`, message: chatInput, timestamp: new Date(), clientId, staff_token: localStorage.getItem('token') };
     
     // Optimistic update
     setChatMessages(prev => [...prev, msg]);

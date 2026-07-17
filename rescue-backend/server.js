@@ -750,9 +750,15 @@ io.on('connection', (socket) => {
         }
 
         // Broadcast directly to Citizen who is waiting in `incident_room_123`
-        if (active_incident_id) {
-            socket.join(`incident_room_${active_incident_id}`);
-            io.to(`incident_room_${active_incident_id}`).emit('vehicle_location_updated', { latitude, longitude });
+        // (staff_token required — this event is driver-only, unlike send_chat_message/join_incident_room)
+        if (active_incident_id && data.staff_token) {
+            try {
+                jwt.verify(data.staff_token, JWT_SECRET);
+                socket.join(`incident_room_${active_incident_id}`);
+                io.to(`incident_room_${active_incident_id}`).emit('vehicle_location_updated', { latitude, longitude });
+            } catch (e) {
+                // invalid/missing staff_token — don't join the room or broadcast
+            }
         }
     });
 
@@ -783,14 +789,31 @@ io.on('connection', (socket) => {
     });
 
     // 4. Real-time Chat Messaging
-    socket.on('send_chat_message', async ({ incident_id, sender, message, image, clientId }) => {
+    // Citizens authenticate with their per-incident citizen_token; drivers/staff
+    // authenticate with the same JWT they already use for REST calls — same
+    // dual-path check as join_incident_room, since this event's own room-join
+    // failsafe was found to bypass that gate entirely.
+    socket.on('send_chat_message', async ({ incident_id, sender, message, image, clientId, citizen_token, staff_token }) => {
         try {
+            if (citizen_token) {
+                const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
+                if (rows.length === 0 || rows[0].citizen_token !== citizen_token) return;
+            } else if (staff_token) {
+                try {
+                    jwt.verify(staff_token, JWT_SECRET);
+                } catch (e) {
+                    return;
+                }
+            } else {
+                return;
+            }
+
             // Failsafe: Ensure sender is in the room
             socket.join(`incident_room_${incident_id}`);
-            
+
             // Save to Database for persistence
             await pool.query('INSERT INTO chat_messages (incident_id, sender, message, image) VALUES (?, ?, ?, ?)', [incident_id, sender, message, image || null]);
-            
+
             // Broadcast to the room (include clientId so sender can avoid duplicate)
             io.to(`incident_room_${incident_id}`).emit('new_chat_message', { sender, message, image, timestamp: new Date(), clientId });
         } catch (e) {

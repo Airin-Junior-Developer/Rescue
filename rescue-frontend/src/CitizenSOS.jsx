@@ -252,7 +252,8 @@ function CitizenSOS() {
       sender: 'Citizen',
       message: chatInput,
       timestamp: new Date(),
-      clientId
+      clientId,
+      citizen_token: activeIncident.citizen_token
     };
     
     // Optimistic update
@@ -268,10 +269,11 @@ function CitizenSOS() {
     const reader = new FileReader();
     reader.onload = (event) => {
         socket.emit('send_chat_message', {
-             incident_id: activeIncident.id, 
-             sender: 'Citizen', 
-             message: '📸 ส่งรูปภาพประกอบ', 
-             image: event.target.result
+             incident_id: activeIncident.id,
+             sender: 'Citizen',
+             message: '📸 ส่งรูปภาพประกอบ',
+             image: event.target.result,
+             citizen_token: activeIncident.citizen_token
         });
     };
     reader.readAsDataURL(file);
