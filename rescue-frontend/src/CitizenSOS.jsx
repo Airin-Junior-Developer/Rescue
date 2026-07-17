@@ -48,6 +48,15 @@ function CitizenSOS() {
   const [routeInfo, setRouteInfo] = useState(null); // ETA
   const mapRef = useRef(null);
 
+  const fetchChatHistory = async (incidentId, token) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/citizen/incidents/${incidentId}/chat`, { params: { token } });
+      setChatMessages(res.data);
+    } catch (e) {
+      console.error("Failed to fetch chat history", e);
+    }
+  };
+
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
@@ -142,16 +151,7 @@ function CitizenSOS() {
         setIsSearching(false);
     });
 
-    const fetchChatHistory = async (incidentId, token) => {
-    try {
-      const res = await axios.get(`${API_URL}/api/citizen/incidents/${incidentId}/chat`, { params: { token } });
-      setChatMessages(res.data);
-    } catch (e) {
-      console.error("Failed to fetch chat history", e);
-    }
-  };
-
-  return () => {
+    return () => {
       socket.off('vehicle_location_updated');
       socket.off('new_chat_message');
       socket.off('mission_completed');
