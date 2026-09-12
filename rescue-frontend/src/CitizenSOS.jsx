@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
@@ -9,18 +9,20 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
 import liff from '@line/liff';
 import { API_URL } from './config';
+import { readIncident, persistPendingIncident, recoverIncident } from './incidentSession';
 
 
 const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] };
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
 const BlueIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png' });
 
-const socket = io(API_URL);
+const socket = io(API_URL, { autoConnect: false });
 
 function CitizenSOS() {
   const [details, setDetails] = useState('');
   const [citizenPhone, setCitizenPhone] = useState('');
-  const [lineUid, setLineUid] = useState(null);
+  const citizenSessionRef = useRef(null);
+  const submittingRef = useRef(false);
   const [lat, setLat] = useState('13.7563');
   const [lng, setLng] = useState('100.5018');
   const [isInLine, setIsInLine] = useState(true);
@@ -36,26 +38,42 @@ function CitizenSOS() {
   const holdTimerRef = useRef(null);
   const progressTimerRef = useRef(null);
 
-  const citizenTokenRef = useRef(null);
-
   // Tracking Screen State
-  const [activeIncident, setActiveIncident] = useState(null);
+  const [activeIncident, setActiveIncident] = useState(() => { const saved = readIncident(localStorage); return saved && saved.status !== 'Pending' ? saved : null; });
   const [rescuerLoc, setRescuerLoc] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchingIncidentId, setSearchingIncidentId] = useState(null);
+  const [isSearching, setIsSearching] = useState(() => readIncident(localStorage)?.status === 'Pending');
+  const [searchingIncidentId, setSearchingIncidentId] = useState(() => { const saved = readIncident(localStorage); return saved?.status === 'Pending' ? saved.id : null; });
   const [routeInfo, setRouteInfo] = useState(null); // ETA
   const mapRef = useRef(null);
 
-  const fetchChatHistory = async (incidentId, token) => {
+  const fetchChatHistory = useCallback(async (incidentId, token) => {
     try {
       const res = await axios.get(`${API_URL}/api/citizen/incidents/${incidentId}/chat`, { params: { token } });
       setChatMessages(res.data);
     } catch (e) {
       console.error("Failed to fetch chat history", e);
     }
-  };
+  }, []);
+
+  const syncIncident = useCallback(async () => {
+    const saved = readIncident(localStorage);
+    if (!saved) return;
+    socket.emit('join_incident_room', { incident_id: saved.id, citizen_token: saved.citizen_token });
+    try {
+      const incident = await recoverIncident(localStorage, async (id, token) => {
+        const res = await axios.get(`${API_URL}/api/incidents/status/${id}`, { params: { token } });
+        return res.data;
+      });
+      setIsSearching(incident?.status === 'Pending');
+      setSearchingIncidentId(incident?.status === 'Pending' ? incident.id : null);
+      setActiveIncident(incident && incident.status !== 'Pending' ? incident : null);
+      if (incident?.status === 'Accepted') await fetchChatHistory(incident.id, incident.citizen_token);
+    } catch (error) {
+      console.error('Incident sync deferred until connection recovers', error.message);
+    }
+  }, [fetchChatHistory]);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -69,9 +87,9 @@ function CitizenSOS() {
         setIsInLine(true);
         if (liff.isLoggedIn()) {
           liff.getProfile().then(profile => {
-            setLineUid(profile.userId);
-            axios.post(`${API_URL}/api/citizen/auth`, { line_uid: profile.userId, display_name: profile.displayName })
+            axios.post(`${API_URL}/api/citizen/auth`, { id_token: liff.getIDToken() })
               .then(res => {
+                citizenSessionRef.current = res.data.citizen_token;
                 if (res.data.phone) {
                   setCitizenPhone(res.data.phone);
                   toast.success(`สวัสดีคุณ ${profile.displayName} ระบบดึงเบอร์โทรของคุณมาให้อัตโนมัติแล้ว!`);
@@ -79,7 +97,7 @@ function CitizenSOS() {
                   // If no phone is registered, enforce registration
                   setShowRegister(true);
                 }
-              }).catch(e => console.error(e));
+              }).catch(() => toast.error('ยืนยันตัวตน LINE ไม่สำเร็จ กรุณาเปิดแอปใหม่เพื่อลองอีกครั้ง'));
           });
         } else {
           // ถ้าเปิดในบราวเซอร์ปกติ แล้วยังไม่ได้ล็อกอิน ให้เด้งไปหน้าล็อกอินของ LINE
@@ -88,7 +106,7 @@ function CitizenSOS() {
     };
 
     // Initialize LINE LIFF
-    liff.init({ liffId: '2009894409-w2sSn3rf' })
+    liff.init({ liffId: import.meta.env.VITE_LIFF_ID || '2009894409-w2sSn3rf' })
       .then(() => {
         if (!liff.isInClient() && !liff.isLoggedIn()) {
             setIsInLine(false);
@@ -97,25 +115,6 @@ function CitizenSOS() {
         handleLiffAuth();
       })
       .catch(err => console.error("LIFF Init failed", err));
-
-    // Persist Mission on Refresh
-    const saved = localStorage.getItem('activeCitizenIncident');
-    if (saved) {
-       const incident = JSON.parse(saved);
-       citizenTokenRef.current = incident.citizen_token;
-       axios.get(`${API_URL}/api/incidents/status/${incident.id}`, { params: { token: incident.citizen_token } })
-          .then(res => {
-              if (res.data.status === 'Resolved' || res.data.status === 'Completed') {
-                  localStorage.removeItem('activeCitizenIncident');
-              } else {
-                  // Merge API missing data like driver_phone into the object if needed
-                  const hydratedIncident = { ...incident, driver_name: res.data.driver_name || incident.driver_name, driver_phone: res.data.driver_phone || incident.driver_phone };
-                  setActiveIncident(hydratedIncident);
-                  socket.emit('join_incident_room', { incident_id: incident.id, citizen_token: incident.citizen_token });
-                  fetchChatHistory(incident.id, incident.citizen_token);
-              }
-          }).catch(() => localStorage.removeItem('activeCitizenIncident'));
-    }
 
     // Socket listeners for Tracking Mode
     socket.on('vehicle_location_updated', (data) => {
@@ -132,24 +131,30 @@ function CitizenSOS() {
     socket.on('mission_completed', () => {
         toast.success("🚑 กู้ภัยความช่วยเหลือเสร็จสิ้นแล้ว! ขอบคุณที่ใช้บริการครับ");
         setActiveIncident(null);
+        setIsSearching(false);
+        setSearchingIncidentId(null);
         setRescuerLoc(null);
         setChatMessages([]);
         localStorage.removeItem('activeCitizenIncident');
     });
 
-    socket.on('driver_assigned', (data) => {
-        toast.success("✅ กู้ภัยกดรับงานแล้ว! ติดตามรถได้เลย");
-        setIsSearching(false);
-        const incident = { id: data.incident_id, assigned_user_id: data.driver_id, driver_name: data.driver_name, driver_phone: data.driver_phone, citizen_token: citizenTokenRef.current };
-        setActiveIncident(incident);
-        localStorage.setItem('activeCitizenIncident', JSON.stringify(incident));
-        fetchChatHistory(data.incident_id, citizenTokenRef.current);
+    socket.on('driver_assigned', () => {
+        toast.success('✅ กู้ภัยกดรับงานแล้ว! ติดตามรถได้เลย');
+        void syncIncident();
     });
 
     socket.on('no_drivers', () => {
         toast.error("❌ ไม่สามารถหารถกู้ภัยที่ว่างในขณะนี้ได้ โปรดโทร 1669");
         setIsSearching(false);
+        setSearchingIncidentId(null);
+        setActiveIncident(null);
+        localStorage.removeItem('activeCitizenIncident');
     });
+
+    socket.on('connect', syncIncident);
+    socket.connect();
+    const retry = setInterval(syncIncident, 10000);
+    void syncIncident();
 
     return () => {
       socket.off('vehicle_location_updated');
@@ -157,29 +162,20 @@ function CitizenSOS() {
       socket.off('mission_completed');
       socket.off('driver_assigned');
       socket.off('no_drivers');
+      socket.off('connect', syncIncident);
+      clearInterval(retry);
+      clearTimeout(holdTimerRef.current);
+      clearInterval(progressTimerRef.current);
+      socket.disconnect();
     };
-  }, []);
-
-  // Handle socket reconnection (e.g. Railway drops idle connection)
-  useEffect(() => {
-    const handleReconnect = () => {
-      if (activeIncident) {
-        socket.emit('join_incident_room', { incident_id: activeIncident.id, citizen_token: activeIncident.citizen_token });
-        fetchChatHistory(activeIncident.id, activeIncident.citizen_token);
-      } else if (searchingIncidentId) {
-        socket.emit('join_incident_room', { incident_id: searchingIncidentId, citizen_token: citizenTokenRef.current });
-      }
-    };
-    socket.on('connect', handleReconnect);
-    return () => socket.off('connect', handleReconnect);
-  }, [activeIncident, searchingIncidentId]);
+  }, [syncIncident]);
 
   useEffect(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
   // --------------- SOS HOLD LOGIC ---------------
-  const startHold = () => {
+  function startHold() {
     if (!citizenPhone.trim()) {
       toast.warning('กรุณากรอกเบอร์โทรศัพท์ก่อนกดแจ้งเหตุ (Phone Number Required)');
       setShowRegister(true);
@@ -208,7 +204,7 @@ function CitizenSOS() {
           return;
       }
       try {
-          await axios.post(`${API_URL}/api/citizen/register-phone`, { line_uid: lineUid, phone: registerPhoneInput });
+          await axios.post(`${API_URL}/api/citizen/register-phone`, { phone: registerPhoneInput }, { headers: { Authorization: `Bearer ${citizenSessionRef.current}` } });
           setCitizenPhone(registerPhoneInput);
           setShowRegister(false);
           toast.success('ลงทะเบียนเบอร์โทรสำเร็จ! คุณสามารถกดแจ้งเหตุฉุกเฉินได้ทันที');
@@ -217,31 +213,34 @@ function CitizenSOS() {
       }
   };
 
-  const stopHold = () => {
+  function stopHold() {
     setIsHolding(false);
     setHoldProgress(0);
     clearTimeout(holdTimerRef.current);
     clearInterval(progressTimerRef.current);
   };
 
-  const submitSOS = async () => {
+  async function submitSOS() {
+    if (submittingRef.current || readIncident(localStorage)) return;
+    submittingRef.current = true;
     try {
       toast.info('🔍 กำลังค้นหารถกู้ภัยที่ใกล้ที่สุดให้คุณ...');
       setIsSearching(true);
       const res = await axios.post(`${API_URL}/api/incidents`, {
-        details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone, line_uid: lineUid
+        details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone
       });
+      persistPendingIncident(localStorage, res.data);
       setSearchingIncidentId(res.data.incident_id);
-      citizenTokenRef.current = res.data.citizen_token;
 
       // Join the private socket room to wait for driver_assigned matching event!
       socket.emit('join_incident_room', { incident_id: res.data.incident_id, citizen_token: res.data.citizen_token });
+      void syncIncident();
 
     } catch (e) {
       toast.error('❌ ค้นหาล้มเหลว: ' + (e.response?.data?.error || 'เซิร์ฟเวอร์มีปัญหา'));
       setIsSearching(false);
-    }
-  };
+    } finally { submittingRef.current = false; }
+  }
 
   // --------------- CHAT LOGIC ---------------
   const sendMessage = () => {
@@ -479,14 +478,16 @@ function RoutingMachine({ citizen, rescuer, setRouteInfo }) {
   const map = useMap();
   const routingControlRef = useRef(null);
 
+  const citizenLat = citizen?.[0], citizenLng = citizen?.[1];
+  const rescuerLat = rescuer?.lat, rescuerLng = rescuer?.lng;
   useEffect(() => {
-    if (!citizen || !rescuer) return;
+    if (citizenLat == null || citizenLng == null || rescuerLat == null || rescuerLng == null) return;
 
     if (!routingControlRef.current) {
       routingControlRef.current = L.Routing.control({
         waypoints: [
-          L.latLng(rescuer.lat, rescuer.lng),
-          L.latLng(citizen[0], citizen[1])
+          L.latLng(rescuerLat, rescuerLng),
+          L.latLng(citizenLat, citizenLng)
         ],
         lineOptions: { styles: [{ color: '#10b981', weight: 6, opacity: 0.9 }] },
         createMarker: () => null, show: false, addWaypoints: false,
@@ -499,11 +500,11 @@ function RoutingMachine({ citizen, rescuer, setRouteInfo }) {
       });
     } else {
       routingControlRef.current.setWaypoints([
-        L.latLng(rescuer.lat, rescuer.lng),
-        L.latLng(citizen[0], citizen[1])
+        L.latLng(rescuerLat, rescuerLng),
+        L.latLng(citizenLat, citizenLng)
       ]);
     }
-  }, [citizen[0], citizen[1], rescuer?.lat, rescuer?.lng, map, setRouteInfo]);
+  }, [citizenLat, citizenLng, rescuerLat, rescuerLng, map, setRouteInfo]);
 
   useEffect(() => {
     return () => { if (routingControlRef.current) map.removeControl(routingControlRef.current); };

@@ -15,22 +15,12 @@ function RescuerRegister() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // We need an open public endpoint to fetch foundations.
-    // Currently, /api/admin/foundations is protected. 
-    // Since we don't have a public one, we'll try to fetch with a dummy or let the backend open it.
-    // Actually, I'll need to modify server.js to allow public fetch of foundations!
-    // For now, I will add an API call. If it fails due to auth, I'll need to fix server.js.
-    fetchFoundations();
+    let cancelled = false;
+    axios.get(`${API_URL}/api/foundations/public`)
+      .then(res => { if (!cancelled) setFoundations(res.data); })
+      .catch(error => console.error('Failed to load foundations', error));
+    return () => { cancelled = true; };
   }, []);
-
-  const fetchFoundations = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/api/foundations/public`);
-      setFoundations(res.data);
-    } catch (error) {
-      console.error("Failed to load foundations", error);
-    }
-  };
 
   const handleRegister = async (e) => {
     e.preventDefault();

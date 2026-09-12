@@ -1,0 +1,44 @@
+# Demo hosting only. Keep both services explicitly on the free plan.
+services:
+  - type: web
+    name: rescue-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: rescue-backend
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.3
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL
+        value: 'true'
+      - key: DB_SSL_CA
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: LINE_LOGIN_CHANNEL_ID
+        value: '2009894409'
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: rescue-presence
+          type: keyvalue
+          property: connectionString
+  - type: keyvalue
+    name: rescue-presence
+    plan: free
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: noeviction

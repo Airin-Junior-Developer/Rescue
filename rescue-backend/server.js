@@ -51,12 +51,8 @@ async function sendLinePush(lineUid, message) {
 }
 
 
-const pool = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-});
+const { databaseConfig } = require('./databaseConfig');
+const pool = mysql.createPool(databaseConfig(process.env));
 
 // Auto-migrate timestamps for KPI metrics without breaking schema
 pool.query('ALTER TABLE incidents ADD COLUMN accepted_at TIMESTAMP NULL').catch(()=>{});
@@ -102,9 +98,9 @@ pool.query(`
     )
 `).catch(()=>{});
 
-const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
+const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379', disableOfflineQueue: true });
 redisClient.on('error', (err) => console.log('Redis error:', err));
-redisClient.connect().then(() => console.log('Connected to Redis'));
+redisClient.connect().then(() => console.log('Connected to Redis')).catch(err => console.error('[REDIS CONNECT]', err.message));
 
 // 🗑️ Auto-Cleanup: Delete chat messages older than 3 days
 async function cleanupChatHistory() {
@@ -161,10 +157,10 @@ setInterval(async () => {
         const [rows] = await pool.query('SELECT * FROM incidents WHERE status = "Pending"');
         for (const inc of rows) {
             if (!dispatchState[inc.id]) { 
-                const nearbyDriverIds = await redisClient.sendCommand(['GEORADIUS', 'online_rescuers', inc.longitude.toString(), inc.latitude.toString(), '50', 'km', 'ASC']);
+                const nearbyDriverIds = await nearbyAvailableDrivers(inc.latitude, inc.longitude);
                 console.log(`[SYS] 5s Loop: Found Pending SOS #${inc.id}, Nearby drivers: ${nearbyDriverIds.join(',')}`);
                 if (nearbyDriverIds.length > 0) {
-                     broadcastOffer(inc.id, nearbyDriverIds, { details: inc.details, latitude: inc.latitude, longitude: inc.longitude, citizen_phone: inc.citizen_phone });
+                     await broadcastOffer(inc.id, nearbyDriverIds, { details: inc.details, latitude: inc.latitude, longitude: inc.longitude, citizen_phone: inc.citizen_phone, parent_incident_id: inc.parent_incident_id });
                 }
             } else {
                 console.log(`[SYS] 5s Loop: Incident #${inc.id} is already ringing, ignoring...`);
@@ -199,37 +195,116 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
     const token = req.headers['authorization'];
     if (!token) return res.status(403).json({ error: 'A token is required' });
     try {
-        req.user = jwt.verify(token.replace('Bearer ', ''), JWT_SECRET);
+        req.user = await authenticateStaff(token.replace('Bearer ', ''));
         next();
     } catch (err) { res.status(401).json({ error: 'Invalid Token' }); }
 };
 
+// Resolve identity from the database on every privileged request (approval can be revoked).
+async function authenticateStaff(token) {
+    const claims = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (!['admin', 'rescue'].includes(claims.role?.toLowerCase())) throw new Error('Unauthorized');
+    const [rows] = await pool.query('SELECT id, username, role, foundation_id, phone, is_approved FROM users WHERE id = ?', [claims.id]);
+    const user = rows[0];
+    if (!user || !['admin', 'rescue'].includes(user.role?.toLowerCase()) ||
+        (user.role.toLowerCase() === 'rescue' && !user.is_approved)) throw new Error('Unauthorized');
+    return user;
+}
+
+async function staffIncidentAccess(user, incidentId, family = false) {
+    const [rows] = await pool.query('SELECT * FROM incidents WHERE id = ?', [incidentId]);
+    const incident = rows[0];
+    if (!incident) return null;
+    if (user.role.toLowerCase() === 'admin' || String(incident.assigned_user_id) === String(user.id)) return incident;
+    if (family) {
+        const rootId = incident.parent_incident_id || incident.id;
+        const [assigned] = await pool.query('SELECT assigned_user_id FROM incidents WHERE (id = ? OR parent_incident_id = ?) AND assigned_user_id = ?', [rootId, rootId, user.id]);
+        if (assigned.some(row => String(row.assigned_user_id) === String(user.id))) return incident;
+    }
+    return null;
+}
+
+async function verifyLineIdentity(idToken) {
+    if (typeof idToken !== 'string' || !idToken) throw new Error('Unauthorized');
+    const channelId = process.env.LINE_LOGIN_CHANNEL_ID;
+    if (!channelId) throw new Error('LINE Login is not configured');
+    const { data } = await axios.post('https://api.line.me/oauth2/v2.1/verify',
+        new URLSearchParams({ id_token: idToken, client_id: channelId }).toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 5000 });
+    if (!data.sub || String(data.aud) !== String(channelId) || data.iss !== 'https://access.line.me' || (!Number.isFinite(data.exp) || data.exp * 1000 <= Date.now())) throw new Error('Unauthorized');
+    return { line_uid: data.sub, display_name: data.name || '' };
+}
+
+const verifyCitizenSession = (req, res, next) => {
+    try {
+        const claims = jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), JWT_SECRET, { algorithms: ['HS256'] });
+        if (claims.role !== 'Citizen' || !claims.sub) throw new Error('Unauthorized');
+        req.citizen = claims;
+        next();
+    } catch { res.status(401).json({ error: 'กรุณาเข้าสู่ระบบ LINE ใหม่' }); }
+};
+
+// GEO members have no individual TTL. Only dispatch to members with a live status lease.
+async function nearbyAvailableDrivers(latitude, longitude) {
+    if (!redisClient.isReady) return [];
+    const ids = await redisClient.sendCommand(['GEORADIUS', 'online_rescuers', String(longitude), String(latitude), '50', 'km', 'ASC']);
+    const available = [];
+    for (const id of ids) {
+        const raw = await redisClient.get(`rescuer_status:${id}`);
+        const status = raw && JSON.parse(raw);
+        if (status?.status === 'available' && status.last_seen > Date.now() - 60000) available.push(id);
+        else await redisClient.sendCommand(['ZREM', 'online_rescuers', String(id)]);
+    }
+    return available;
+}
+
+// Change availability on the current lease only; never recreate a disconnected driver's key.
+async function setDriverAvailability(userId, status) {
+    try {
+        if (!redisClient.isReady) return;
+        await redisClient.eval(`-- status-write
+            local raw = redis.call('GET', KEYS[1])
+            if not raw then return 0 end
+            local ttl = redis.call('PTTL', KEYS[1])
+            if ttl <= 0 then redis.call('DEL', KEYS[1]); redis.call('ZREM', KEYS[2], ARGV[2]); return 0 end
+            local state = cjson.decode(raw)
+            state.status = ARGV[1]
+            redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ttl)
+            if ARGV[1] == 'available' then redis.call('GEOADD', KEYS[2], state.longitude, state.latitude, ARGV[2])
+            else redis.call('ZREM', KEYS[2], ARGV[2]) end
+            return 1`, { keys: [`rescuer_status:${userId}`, 'online_rescuers'], arguments: [status, String(userId)] });
+    } catch (error) {
+        // SQL is authoritative. Heartbeat/polling reconcile a Redis outage without undoing the case.
+        console.error('[PRESENCE SYNC]', error.message);
+    }
+}
+
 // Citizen LINE Auth
 app.post('/api/citizen/auth', publicWriteLimiter, async (req, res) => {
     try {
-        const { line_uid, display_name } = req.body;
-        if (!line_uid) return res.status(400).json({ error: 'line_uid required' });
-
+        const { line_uid, display_name } = await verifyLineIdentity(req.body.id_token);
+        const citizen_token = jwt.sign({ sub: line_uid, role: 'Citizen' }, JWT_SECRET, { expiresIn: '1h' });
         const [rows] = await pool.query('SELECT phone FROM citizens WHERE line_uid = ?', [line_uid]);
         if (rows.length > 0) {
             await pool.query('UPDATE citizens SET display_name = ? WHERE line_uid = ?', [display_name, line_uid]);
-            res.json({ message: 'Authenticated', phone: rows[0].phone || '' });
+            res.json({ message: 'Authenticated', phone: rows[0].phone || '', citizen_token });
         } else {
             await pool.query('INSERT INTO citizens (line_uid, display_name) VALUES (?, ?)', [line_uid, display_name]);
-            res.json({ message: 'New citizen created', phone: '' });
+            res.json({ message: 'New citizen created', phone: '', citizen_token });
         }
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { res.status(401).json({ error: 'ไม่สามารถยืนยันตัวตน LINE ได้ กรุณาเข้าสู่ระบบใหม่' }); }
 });
 
 // Citizen Register Phone (Standalone API)
-app.post('/api/citizen/register-phone', publicWriteLimiter, async (req, res) => {
+app.post('/api/citizen/register-phone', publicWriteLimiter, verifyCitizenSession, async (req, res) => {
     try {
-        const { line_uid, phone } = req.body;
-        if (!line_uid || !phone) return res.status(400).json({ error: 'Missing data' });
+        const { phone } = req.body;
+        const line_uid = req.citizen.sub;
+        if (typeof phone !== 'string' || !/^0\d{8,9}$/.test(phone)) return res.status(400).json({ error: 'Missing data' });
         await pool.query('UPDATE citizens SET phone = ? WHERE line_uid = ?', [phone, line_uid]);
         res.json({ message: 'Phone updated successfully' });
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -238,30 +313,12 @@ app.post('/api/citizen/register-phone', publicWriteLimiter, async (req, res) => 
 // 2. Incident API (Auto-Dispatch GRAB-Style)
 app.post('/api/incidents', sosLimiter, async (req, res) => {
     try {
-        let { details, latitude, longitude, citizen_phone, line_uid } = req.body;
-        latitude = parseFloat(latitude); longitude = parseFloat(longitude);
-
-        if (isNaN(latitude) || isNaN(longitude)) return res.status(400).json({ error: 'Invalid GPS' });
-
-        // If line_uid is provided, update their phone number in the citizens table
-        if (line_uid && citizen_phone) {
-            await pool.query('UPDATE citizens SET phone = ? WHERE line_uid = ?', [citizen_phone, line_uid]);
+        let { details, latitude, longitude, citizen_phone } = req.body;
+        latitude = Number(latitude); longitude = Number(longitude);
+        if (req.body.latitude == null || req.body.longitude == null || !Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 85.05112878 || Math.abs(longitude) > 180) {
+            return res.status(400).json({ error: 'Invalid GPS' });
         }
-
-        // Phase 1: Retrieve all online/available drivers within 50km using Redis GEOSPATIAL
-        const nearbyDriverIds = await redisClient.sendCommand([
-            'GEORADIUS', 
-            'online_rescuers', 
-            longitude.toString(), 
-            latitude.toString(), 
-            '50', 
-            'km', 
-            'ASC'
-        ]);
-
-        let closestDriverId = null;
-        let closestFoundationId = null;
-        let rescuerPhone = null;
+        // A public SOS never updates another citizen's identity or registered phone.
 
         // AUTO-ASSIGN: Create Pending Case ALWAYS (Even if no one is nearby right now)
         const citizen_token = crypto.randomUUID();
@@ -271,9 +328,11 @@ app.post('/api/incidents', sosLimiter, async (req, res) => {
         );
         const incident_id = result.insertId;
 
-        // If drivers are nearby, kick off blast immediately.
-        if (nearbyDriverIds.length > 0) {
-            broadcastOffer(incident_id, nearbyDriverIds, { details, latitude, longitude, citizen_phone });
+        // A persisted Pending case is retried by the polling loop if Redis is down.
+        if (redisClient.isReady) {
+            nearbyAvailableDrivers(latitude, longitude)
+                .then(drivers => broadcastOffer(incident_id, drivers, { details, latitude, longitude, citizen_phone }))
+                .catch(error => console.error('[DISPATCH DEFERRED]', error.message));
         }
 
         res.status(201).json({ message: 'Searching for rescuer', incident_id, citizen_token });
@@ -286,6 +345,7 @@ app.post('/api/incidents', sosLimiter, async (req, res) => {
 app.post('/api/incidents/:id/accept', verifyToken, async (req, res) => {
     const incident_id = req.params.id;
     const driver_id = req.user.id;
+    if (req.user.role.toLowerCase() !== 'rescue') return res.status(403).json({ error: 'Driver required' });
 
     try {
         // Atomic Lock: ONLY update if it is still 'Pending' (hasn't been stolen by someone else yet)
@@ -307,13 +367,7 @@ app.post('/api/incidents/:id/accept', verifyToken, async (req, res) => {
         // Instantly kill the ringing screen on ALL OTHER online drivers' phones for this incident
         io.emit('cancel_offer', { incident_id });
 
-        const statStr = await redisClient.get(`rescuer_status:${driver_id}`);
-        if(statStr) {
-            let stat = JSON.parse(statStr);
-            stat.status = 'busy';
-            await redisClient.set(`rescuer_status:${driver_id}`, JSON.stringify(stat));
-            await redisClient.sendCommand(['ZREM', 'online_rescuers', driver_id.toString()]);
-        }
+        await setDriverAvailability(driver_id, 'busy');
 
         const [driverRows] = await pool.query('SELECT username, phone FROM users WHERE id = ?', [driver_id]);
         const rescuerInfo = driverRows[0] || {};
@@ -353,6 +407,9 @@ app.post('/api/incidents/:id/reject', verifyToken, async (req, res) => {
 app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
     try {
         const parent_id = req.params.id;
+        const authorized = await staffIncidentAccess(req.user, parent_id, true);
+        if (!authorized) return res.status(403).json({ error: 'Forbidden' });
+        if (authorized.status !== 'Accepted') return res.status(409).json({ error: 'Incident is not active' });
         
         const [counts] = await pool.query('SELECT COUNT(*) as count FROM incidents WHERE parent_incident_id = ? AND status != "Resolved"', [parent_id]);
         if (counts[0].count >= 3) return res.status(400).json({ error: 'ถึงจำกัดการขอกำลังเสริมแล้ว (Max 3 units)' });
@@ -374,7 +431,7 @@ app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
         );
         const incident_id = result.insertId;
 
-        const nearbyDriverIds = await redisClient.sendCommand(['GEORADIUS', 'online_rescuers', p.longitude.toString(), p.latitude.toString(), '50', 'km', 'ASC']);
+        const nearbyDriverIds = await nearbyAvailableDrivers(p.latitude, p.longitude);
         const eligibleDrivers = nearbyDriverIds.filter(id => id != req.user.id);
         if (eligibleDrivers.length > 0) {
             broadcastOffer(incident_id, eligibleDrivers, { details, latitude: p.latitude, longitude: p.longitude, citizen_phone: p.citizen_phone, parent_incident_id: parent_id });
@@ -473,13 +530,7 @@ app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
         
         for (const user of assignedRows) {
             const uid = user.assigned_user_id;
-            const statStr = await redisClient.get(`rescuer_status:${uid}`);
-            if(statStr) {
-               let stat = JSON.parse(statStr);
-               stat.status = 'available';
-               await redisClient.set(`rescuer_status:${uid}`, JSON.stringify(stat));
-               await redisClient.sendCommand(['GEOADD', 'online_rescuers', stat.longitude.toString(), stat.latitude.toString(), uid.toString()]);
-            }
+            await setDriverAvailability(uid, 'available');
         }
         
         console.log("[DEBUG] Updating DB status to Resolved...");
@@ -619,6 +670,7 @@ app.get('/api/incidents/active', verifyToken, async (req, res) => {
 app.get('/api/incidents/:id/chat', verifyToken, async (req, res) => {
     try {
         const incident_id = req.params.id;
+        if (!await staffIncidentAccess(req.user, incident_id, true)) return res.status(403).json({ error: 'Forbidden' });
         const [rows] = await pool.query(`
             SELECT * FROM chat_messages 
             WHERE incident_id = ? 
@@ -655,28 +707,25 @@ app.get('/api/citizen/incidents/:id/chat', async (req, res) => {
 // Driver complete case
 app.post('/api/incidents/:id/complete', verifyToken, async (req, res) => {
     try {
+        const incident = await staffIncidentAccess(req.user, req.params.id);
+        if (!incident) return res.status(403).json({ error: 'Forbidden' });
+        if (incident.status !== 'Accepted') return res.status(409).json({ error: 'Incident is not active' });
         await pool.query('UPDATE incidents SET status = "Resolved", resolved_at = CURRENT_TIMESTAMP WHERE id = ? OR parent_incident_id = ?', [req.params.id, req.params.id]);
 
         const [assignedRows] = await pool.query('SELECT assigned_user_id FROM incidents WHERE (id = ? OR parent_incident_id = ?) AND assigned_user_id IS NOT NULL', [req.params.id, req.params.id]);
         for (const user of assignedRows) {
             const uid = user.assigned_user_id;
-            const statStr = await redisClient.get(`rescuer_status:${uid}`);
-            if(statStr) {
-                let stat = JSON.parse(statStr);
-                stat.status = 'available';
-                await redisClient.set(`rescuer_status:${uid}`, JSON.stringify(stat));
-                await redisClient.sendCommand(['GEOADD', 'online_rescuers', stat.longitude.toString(), stat.latitude.toString(), uid.toString()]);
-            }
+            await setDriverAvailability(uid, 'available');
         }
 
         const [incRows] = await pool.query('SELECT parent_incident_id, citizen_phone FROM incidents WHERE id = ?', [req.params.id]);
         const parent_id = incRows.length > 0 && incRows[0].parent_incident_id ? incRows[0].parent_incident_id : req.params.id;
         const citizen_phone = incRows.length > 0 ? incRows[0].citizen_phone : null;
 
-        io.to(`incident_room_${parent_id}`).emit('mission_completed', { message: 'Mission Cascaded Complete' });
+        if (!incident.parent_incident_id) io.to(`incident_room_${parent_id}`).emit('mission_completed', { message: 'Mission Cascaded Complete' });
 
         // Notify Citizen via LINE Push (mission complete)
-        if (citizen_phone) {
+        if (citizen_phone && !incident.parent_incident_id) {
             const [citizenRows] = await pool.query('SELECT line_uid FROM citizens WHERE phone = ?', [citizen_phone]);
             if (citizenRows.length > 0 && citizenRows[0].line_uid) {
                 const msg = `🏁 ภารกิจเสร็จสิ้นแล้วครับ!\n\n` +
@@ -705,123 +754,111 @@ app.get('/api/incidents/status/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Real-time Socket.io (Driver tracking & Chat)
+// Real-time Socket.io: authenticate before any room join, Redis write or broadcast.
 io.on('connection', (socket) => {
-    console.log('⚡ Connected:', socket.id);
-
-    // 1. Driver goes online (Available for Auto-Dispatch)
-    socket.on('go_online', async ({ user_id, username, foundation_id, latitude, longitude, phone }) => {
-        await redisClient.sendCommand(['GEOADD', 'online_rescuers', longitude.toString(), latitude.toString(), user_id.toString()]);
-        await redisClient.set(`rescuer_status:${user_id}`, JSON.stringify({
-            status: 'available', username, foundation_id, phone, latitude, longitude
-        }));
-        socket.join(`driver_${user_id}`);
-        console.log(`Driver ${user_id} is ONLINE via Mobile.`);
-    });
-
-    socket.on('go_offline', async ({ user_id }) => {
-        await redisClient.sendCommand(['ZREM', 'online_rescuers', user_id.toString()]);
-        await redisClient.del(`rescuer_status:${user_id}`);
-    });
-
-    // 2. Driver sends live GPS (For Tracking)
-    socket.on('update_vehicle_location', async (data) => {
-        const { vehicle_id, latitude, longitude, active_incident_id } = data;
-        
-        const statStr = await redisClient.get(`rescuer_status:${vehicle_id}`);
-        if (statStr) {
-            let stat = JSON.parse(statStr);
-            stat.latitude = latitude; stat.longitude = longitude;
-            await redisClient.set(`rescuer_status:${vehicle_id}`, JSON.stringify(stat));
-            
-            // Only update GEO map if they are still officially available
-            if (stat.status === 'available') {
-                await redisClient.sendCommand(['GEOADD', 'online_rescuers', longitude.toString(), latitude.toString(), vehicle_id.toString()]);
-            }
-
-            // 🔴 Broadcast real-time location to all admins instantly (no polling needed)
-            io.to('admin_room').emit('rescuer_location_update', {
-                vehicle_id,
-                username: stat.username || vehicle_id,
-                latitude,
-                longitude,
-                status: stat.status
-            });
+    let operations = Promise.resolve();
+    const safe = handler => (data = {}, ack = () => {}) => {
+        operations = operations.then(async () => {
+        try { const result = await handler(data || {}); if (typeof ack === 'function') ack({ ok: true, ...result }); }
+        catch (error) { if (typeof ack === 'function') ack({ ok: false, error: 'Unauthorized or unavailable', retry_registration: error.message === 'Presence expired' }); console.error('[SOCKET]', error.message); }
+        });
+        return operations;
+    };
+    const staff = data => authenticateStaff(data.staff_token);
+    const driver = async data => {
+        const user = await staff(data);
+        if (user.role.toLowerCase() !== 'rescue') throw new Error('Driver required');
+        return user;
+    };
+    const coordinates = data => {
+        if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number' || !Number.isFinite(data.latitude) || !Number.isFinite(data.longitude) || Math.abs(data.latitude) > 85.05112878 || Math.abs(data.longitude) > 180) throw new Error('Invalid GPS');
+    };
+    const release = async userId => {
+        // An old socket disconnect must never delete a newly reconnected driver's lease.
+        await redisClient.eval(`local raw = redis.call('GET', KEYS[1])
+            if raw and cjson.decode(raw).socket_id == ARGV[1] then
+                redis.call('DEL', KEYS[1]); redis.call('ZREM', KEYS[2], ARGV[2]); return 1
+            end return 0`, { keys: [`rescuer_status:${userId}`, 'online_rescuers'], arguments: [socket.id, String(userId)] });
+        socket.leave(`driver_${userId}`);
+    };
+    const publishPresence = async (data, user, replaceOwner = false) => {
+        coordinates(data);
+        const [missions] = await pool.query('SELECT id FROM incidents WHERE assigned_user_id = ? AND status = "Accepted"', [user.id]);
+        const status = missions.length ? 'busy' : 'available';
+        const state = { status, username: user.username, foundation_id: user.foundation_id, phone: user.phone,
+            latitude: data.latitude, longitude: data.longitude, last_seen: Date.now(), socket_id: socket.id };
+        if (!socket.connected) throw new Error('Socket disconnected');
+        // Atomically verify the owner, renew the lease and update the GEO index.
+        const saved = await redisClient.eval(`-- presence-write
+            local raw = redis.call('GET', KEYS[1])
+            if ARGV[1] ~= '' and (not raw or cjson.decode(raw).socket_id ~= ARGV[1]) then return 0 end
+            redis.call('SET', KEYS[1], ARGV[2], 'EX', 60)
+            if ARGV[3] == 'available' then redis.call('GEOADD', KEYS[2], ARGV[4], ARGV[5], ARGV[6])
+            else redis.call('ZREM', KEYS[2], ARGV[6]) end
+            return 1`, { keys: [`rescuer_status:${user.id}`, 'online_rescuers'],
+                arguments: [replaceOwner ? '' : socket.id, JSON.stringify(state), status, String(data.longitude), String(data.latitude), String(user.id)] });
+        if (!saved) throw new Error('Driver session replaced or expired');
+        socket.data.userId = user.id;
+        socket.join(`driver_${user.id}`);
+        return state;
+    };
+    socket.on('go_online', safe(async data => {
+        const user = await driver(data);
+        await publishPresence(data, user, true);
+    }));
+    socket.on('go_offline', safe(async data => {
+        const user = await driver(data);
+        await release(user.id);
+        socket.data.userId = null;
+    }));
+    socket.on('disconnect', safe(async () => {
+        if (socket.data.userId) {
+            try { await release(socket.data.userId); } catch (error) { console.error('[PRESENCE]', error.message); }
         }
-
-        // Broadcast directly to Citizen who is waiting in `incident_room_123`
-        // (staff_token required — this event is driver-only, unlike send_chat_message/join_incident_room)
-        if (active_incident_id && data.staff_token) {
-            try {
-                jwt.verify(data.staff_token, JWT_SECRET);
-                socket.join(`incident_room_${active_incident_id}`);
-                io.to(`incident_room_${active_incident_id}`).emit('vehicle_location_updated', { latitude, longitude });
-            } catch (e) {
-                // invalid/missing staff_token — don't join the room or broadcast
-            }
+    }));
+    socket.on('update_vehicle_location', safe(async data => {
+        const user = await driver(data);
+        coordinates(data);
+        if (data.active_incident_id && !await staffIncidentAccess(user, data.active_incident_id, true)) throw new Error('Forbidden');
+        const raw = await redisClient.get(`rescuer_status:${user.id}`);
+        if (!raw) throw new Error('Presence expired');
+        if (JSON.parse(raw).socket_id !== socket.id) throw new Error('Driver session replaced');
+        const state = await publishPresence(data, user);
+        io.to('admin_room').emit('rescuer_location_update', { vehicle_id: user.id, ...state });
+        if (data.active_incident_id) {
+            io.to(`incident_room_${data.active_incident_id}`).emit('vehicle_location_updated', { latitude: data.latitude, longitude: data.longitude });
         }
-    });
-
-
-    // 3. Citizen / Worker joins private Chat & GPS Tracker Room
-    // Citizens authenticate with their per-incident citizen_token; drivers/staff
-    // authenticate with the same JWT they already use for REST calls.
-    socket.on('join_incident_room', async ({ incident_id, citizen_token, staff_token }) => {
-        if (citizen_token) {
-            try {
-                const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
-                if (rows.length === 0 || rows[0].citizen_token !== citizen_token) return;
-            } catch (e) {
-                console.error('[JOIN_ROOM ERROR]', e);
-                return;
-            }
-        } else if (staff_token) {
-            try {
-                jwt.verify(staff_token, JWT_SECRET);
-            } catch (e) {
-                return;
-            }
-        } else {
-            return;
+    }));
+    socket.on('join_admin_room', safe(async data => {
+        const user = await staff(data);
+        if (user.role.toLowerCase() !== 'admin') throw new Error('Forbidden');
+        socket.join('admin_room');
+    }));
+    const roomAccess = async data => {
+        if (data.citizen_token) {
+            const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [data.incident_id]);
+            if (!rows[0]?.citizen_token || rows[0].citizen_token !== data.citizen_token) throw new Error('Forbidden');
+            return 'Citizen';
         }
+        const user = await staff(data);
+        if (!await staffIncidentAccess(user, data.incident_id, true)) throw new Error('Forbidden');
+        return `Staff:${user.username}`;
+    };
+    socket.on('join_incident_room', safe(async data => {
+        await roomAccess(data);
+        socket.join(`incident_room_${data.incident_id}`);
+    }));
+    socket.on('send_chat_message', safe(async data => {
+        const sender = await roomAccess(data);
+        const { incident_id, message, image, clientId } = data;
+        if (typeof message !== 'string' || message.length > 5000 || (image && (typeof image !== 'string' || image.length > 500000))) throw new Error('Invalid message');
+        await pool.query('INSERT INTO chat_messages (incident_id, sender, message, image) VALUES (?, ?, ?, ?)', [incident_id, sender, message, image || null]);
         socket.join(`incident_room_${incident_id}`);
-        console.log(`User joined incident tracking room ${incident_id}`);
-    });
-
-    // 4. Real-time Chat Messaging
-    // Citizens authenticate with their per-incident citizen_token; drivers/staff
-    // authenticate with the same JWT they already use for REST calls — same
-    // dual-path check as join_incident_room, since this event's own room-join
-    // failsafe was found to bypass that gate entirely.
-    socket.on('send_chat_message', async ({ incident_id, sender, message, image, clientId, citizen_token, staff_token }) => {
-        try {
-            if (citizen_token) {
-                const [rows] = await pool.query('SELECT citizen_token FROM incidents WHERE id = ?', [incident_id]);
-                if (rows.length === 0 || rows[0].citizen_token !== citizen_token) return;
-            } else if (staff_token) {
-                try {
-                    jwt.verify(staff_token, JWT_SECRET);
-                } catch (e) {
-                    return;
-                }
-            } else {
-                return;
-            }
-
-            // Failsafe: Ensure sender is in the room
-            socket.join(`incident_room_${incident_id}`);
-
-            // Save to Database for persistence
-            await pool.query('INSERT INTO chat_messages (incident_id, sender, message, image) VALUES (?, ?, ?, ?)', [incident_id, sender, message, image || null]);
-
-            // Broadcast to the room (include clientId so sender can avoid duplicate)
-            io.to(`incident_room_${incident_id}`).emit('new_chat_message', { sender, message, image, timestamp: new Date(), clientId });
-        } catch (e) {
-            console.error('[CHAT ERROR]', e);
-        }
-    });
+        io.to(`incident_room_${incident_id}`).emit('new_chat_message', { sender, message, image, timestamp: new Date(), clientId });
+    }));
 });
 
-server.listen(3000, () => {
-    console.log(`🚀 Automated Grab-style Dispatch Server on port 3000`);
+const port = Number(process.env.PORT || 3000);
+server.listen(port, '0.0.0.0', () => {
+    console.log(`Rescue dispatch server on port ${port}`);
 });

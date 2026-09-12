@@ -26,7 +26,7 @@ function Login({ onLogin }) {
         } else {
             alert('Access Denied: Only Admins can access God View');
         }
-    } catch(e) { alert('Login Failed'); }
+    } catch { alert('Login Failed'); }
   };
 
   return (

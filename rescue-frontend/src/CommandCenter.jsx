@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
 import 'leaflet/dist/leaflet.css';
@@ -14,7 +14,7 @@ const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leafle
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
 const BlueIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png' });
 
-const socket = io(API_URL);
+const socket = io(API_URL, { autoConnect: false });
 
 function CommandCenter({ user, onLogout }) {
   const [isOnline, setIsOnline] = useState(false);
@@ -32,11 +32,39 @@ function CommandCenter({ user, onLogout }) {
   const chatEndRef = useRef(null);
 
   const gpsInterval = useRef(null);
+  const registeredSocket = useRef(null);
   const mapRef = useRef(null);
+
+  const fetchChatHistory = useCallback(async (incidentId) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/incidents/${incidentId}/chat`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      setChatMessages(res.data);
+    } catch (e) {
+      console.error("Failed to fetch chat history", e);
+    }
+  }, []);
+
+  const fetchActiveMission = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_URL}/api/incidents/active`, {
+         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      setActiveMission(res.data || null);
+      if (res.data) {
+         setIsOnline(true);
+         const roomId = res.data.parent_incident_id || res.data.id;
+         socket.emit('join_incident_room', { incident_id: roomId, staff_token: localStorage.getItem('token') });
+         fetchChatHistory(res.data.id);
+      }
+    } catch (error) { console.error('Failed to recover mission', error.message); }
+  }, [fetchChatHistory]);
 
   useEffect(() => {
     // 1. Fetch any existing active mission if app reloads
-    fetchActiveMission();
+    socket.on('connect', fetchActiveMission);
+    socket.connect();
 
     // 2. Real GPS Tracking using navigator.geolocation
     if (navigator.geolocation) {
@@ -89,71 +117,55 @@ function CommandCenter({ user, onLogout }) {
       socket.off('cancel_offer');
       socket.off('new_chat_message');
       socket.off('admin_broadcast');
+      socket.off('connect', fetchActiveMission);
+      socket.disconnect();
     };
-  }, []);
+  }, [fetchActiveMission]);
 
-  // Handle socket reconnection
+  // Re-register the driver's room on reconnect and renew its 60-second lease.
   useEffect(() => {
-    const handleReconnect = () => {
-      if (activeMission) {
-        socket.emit('join_incident_room', { incident_id: activeMission.parent_incident_id || activeMission.id, staff_token: localStorage.getItem('token') });
-        fetchChatHistory(activeMission.id);
+    const register = () => {
+      if (gpsReady && (isOnline || activeMission) && socket.connected) {
+        const event = registeredSocket.current === socket.id ? 'update_vehicle_location' : 'go_online';
+        socket.timeout(5000).emit(event, {
+          latitude: lat, longitude: lng, active_incident_id: activeMission?.parent_incident_id || activeMission?.id,
+          staff_token: localStorage.getItem('token')
+        }, (error, result) => {
+          if (error || !result?.ok) {
+            // Re-register after a lost/expired lease, but not after another device takes ownership.
+            if (result?.retry_registration) registeredSocket.current = null;
+            console.error('Unable to renew driver presence');
+          } else registeredSocket.current = socket.id;
+        });
       }
     };
-    socket.on('connect', handleReconnect);
-    return () => socket.off('connect', handleReconnect);
-  }, [activeMission]);
+    const reconnect = () => { registeredSocket.current = null; register(); };
+    socket.on('connect', reconnect);
+    socket.on('mission_completed', fetchActiveMission);
+    register();
+    const heartbeat = setInterval(register, 20000);
+    return () => {
+      clearInterval(heartbeat);
+      socket.off('connect', reconnect);
+      socket.off('mission_completed', fetchActiveMission);
+    };
+  }, [isOnline, activeMission, gpsReady, lat, lng, fetchActiveMission]);
 
   useEffect(() => {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Update Redis Location repeatedly
-  useEffect(() => {
-      if (isOnline || activeMission) {
-          const roomId = activeMission?.parent_incident_id || activeMission?.id;
-          socket.emit('update_vehicle_location', {
-              vehicle_id: user.id, latitude: lat, longitude: lng, active_incident_id: roomId, staff_token: localStorage.getItem('token')
-          });
-      }
-  }, [lat, lng, isOnline, activeMission]);
-
-
-  const fetchActiveMission = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/api/incidents/active`, {
-         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      if (res.data) {
-         setActiveMission(res.data);
-         const roomId = res.data.parent_incident_id || res.data.id;
-         socket.emit('join_incident_room', { incident_id: roomId, staff_token: localStorage.getItem('token') });
-         fetchChatHistory(res.data.id);
-      }
-    } catch(e) { }
-  };
-
-  const fetchChatHistory = async (incidentId) => {
-    try {
-      const res = await axios.get(`${API_URL}/api/incidents/${incidentId}/chat`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      setChatMessages(res.data);
-    } catch (e) {
-      console.error("Failed to fetch chat history", e);
-    }
-  };
-
   const toggleOnline = () => {
-      if (!isOnline) {
-          socket.emit('go_online', { user_id: user.id, username: user.username, foundation_id: user.foundation_id, phone: user.phone, latitude: lat, longitude: lng });
-          toast.success("🌐 You are now ONLINE. Waiting for dispatch.");
-          setIsOnline(true);
-      } else {
-          socket.emit('go_offline', { user_id: user.id });
-          toast.info("🔴 You are now OFFLINE.");
-          setIsOnline(false);
-      }
+    if (!socket.connected) return toast.error('ยังไม่เชื่อมต่อเซิร์ฟเวอร์ กรุณารอสักครู่');
+    if (!isOnline && !gpsReady) return toast.error('กรุณาเปิด GPS และรอระบุตำแหน่ง');
+    socket.timeout(5000).emit(isOnline ? 'go_offline' : 'go_online', {
+      latitude: lat, longitude: lng, staff_token: localStorage.getItem('token')
+    }, (error, result) => {
+      if (error || !result?.ok) return toast.error('เปลี่ยนสถานะไม่สำเร็จ กรุณาลองอีกครั้ง');
+      registeredSocket.current = isOnline ? null : socket.id;
+      setIsOnline(!isOnline);
+      toast.success(isOnline ? 'ออฟไลน์แล้ว' : 'ออนไลน์แล้ว พร้อมรับงาน');
+    });
   };
 
   const completeMission = async () => {
@@ -349,7 +361,7 @@ function CommandCenter({ user, onLogout }) {
                {isOnline ? 'Go Offline' : 'Go Online & Ready'}
             </button>
 
-            <button onClick={onLogout} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #475569', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>Log Out</button>
+            <button onClick={() => { socket.disconnect(); onLogout(); }} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #475569', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>Log Out</button>
         </div>
     </div>
   );
@@ -359,13 +371,16 @@ function RoutingMachine({ citizen, rescuer }) {
   const map = useMap();
   const routingControlRef = useRef(null);
 
-  useEffect(() => {
-    if (!citizen || !rescuer) return;
+  const citizenLat = citizen?.[0], citizenLng = citizen?.[1];
+  const rescuerLat = rescuer?.lat, rescuerLng = rescuer?.lng;
 
-    const cLat = parseFloat(citizen[0]);
-    const cLng = parseFloat(citizen[1]);
-    const rLat = parseFloat(rescuer.lat);
-    const rLng = parseFloat(rescuer.lng);
+  useEffect(() => {
+    if (citizenLat == null || citizenLng == null || rescuerLat == null || rescuerLng == null) return;
+
+    const cLat = parseFloat(citizenLat);
+    const cLng = parseFloat(citizenLng);
+    const rLat = parseFloat(rescuerLat);
+    const rLng = parseFloat(rescuerLng);
 
     // Delay the route request by 800ms to prevent identical duplicated requests 
     // from Citizen App and Driver App crashing the OSRM server rate limit at the exact same millisecond.
@@ -394,7 +409,7 @@ function RoutingMachine({ citizen, rescuer }) {
     }, 800);
 
     return () => clearTimeout(delayQuery);
-  }, [citizen[0], citizen[1], rescuer.lat, rescuer.lng, map]);
+  }, [citizenLat, citizenLng, rescuerLat, rescuerLng, map]);
 
   useEffect(() => {
     return () => { if (routingControlRef.current) map.removeControl(routingControlRef.current); };

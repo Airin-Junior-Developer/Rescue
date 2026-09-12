@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from 'react-leaflet';
@@ -6,7 +6,7 @@ import L from 'leaflet';
 import { toast } from 'react-toastify';
 import { API_URL } from './config';
 
-const socket = io(API_URL);
+const socket = io(API_URL, { autoConnect: false });
 
 
 function HeatmapLayer({ data }) {
@@ -64,19 +64,31 @@ function AdminDashboard({ user, onLogout }) {
   const [cancelIncidentId, setCancelIncidentId] = useState(null);
   const [cancelReason, setCancelReason] = useState('สถานการณ์ปลอดภัยแล้ว');
 
-  const fetchFoundations = async () => {
-     try {
-         const res = await axios.get(`${API_URL}/api/admin/foundations`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
-         setFoundations(res.data);
-     } catch (e) { console.error("Failed to fetch foundations", e); }
-  };
 
-  const fetchPendingRescuers = async () => {
+  const fetchPendingRescuers = useCallback(async () => {
       try {
           const res = await axios.get(`${API_URL}/api/admin/rescuers/pending`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
           setPendingRescuers(res.data);
       } catch (e) { console.error("Failed to fetch pending rescuers", e); }
-  };
+  }, []);
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_URL}/api/admin/system-status`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      setIncidents(res.data.incidents || []);
+      setRescuers(res.data.rescuers || []);
+      setHistory(res.data.history || []);
+      setAvgTime(res.data.avgResponseTimeSec || 0);
+      setPrankStats(res.data.prank_stats || []);
+    } catch (error) { console.error('Failed to refresh dashboard', error.message); }
+  }, []);
+  const fetchFoundations = useCallback(async () => {
+     try {
+         const res = await axios.get(`${API_URL}/api/admin/foundations`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
+         setFoundations(res.data);
+     } catch (e) { console.error("Failed to fetch foundations", e); }
+  }, []);
 
   const openManageModal = () => {
       setShowManageModal(true);
@@ -156,8 +168,6 @@ function AdminDashboard({ user, onLogout }) {
   };
 
   useEffect(() => {
-     fetchStatus();
-     fetchPendingRescuers();
      // Keep polling every 10s for full data sync (incidents, history, etc.)
      const interval = setInterval(() => {
          fetchStatus();
@@ -165,10 +175,16 @@ function AdminDashboard({ user, onLogout }) {
      }, 10000);
 
      // Real-time location updates via Socket.IO (no delay!)
-     socket.emit('join_admin_room');
+     const joinAdmin = () => {
+       socket.emit('join_admin_room', { staff_token: localStorage.getItem('token') });
+       void fetchStatus();
+       void fetchPendingRescuers();
+     };
+     socket.on('connect', joinAdmin);
+     socket.connect();
      socket.on('rescuer_location_update', (data) => {
          setRescuers(prev => prev.map(r =>
-             r.user_id === data.vehicle_id
+             String(r.id) === String(data.vehicle_id)
                  ? { ...r, latitude: data.latitude, longitude: data.longitude }
                  : r
          ));
@@ -177,21 +193,10 @@ function AdminDashboard({ user, onLogout }) {
      return () => {
          clearInterval(interval);
          socket.off('rescuer_location_update');
+         socket.off('connect', joinAdmin);
+         socket.disconnect();
      };
-  }, []);
-
-  const fetchStatus = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/api/admin/system-status`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      setIncidents(res.data.incidents || []);
-      setRescuers(res.data.rescuers || []);
-      setHistory(res.data.history || []);
-      setAvgTime(res.data.avgResponseTimeSec || 0);
-      setPrankStats(res.data.prank_stats || []);
-    } catch(e) { }
-  };
+  }, [fetchStatus, fetchPendingRescuers]);
 
   const openCancelModal = (id) => {
       setCancelIncidentId(id);
