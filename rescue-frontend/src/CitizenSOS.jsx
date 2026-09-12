@@ -295,7 +295,7 @@ function CitizenSOS() {
         
         <div style={{ flex: 1, position: 'relative' }}>
           <MapContainer center={[parseFloat(lat), parseFloat(lng)]} zoom={14} style={{ height: '100%', width: '100%' }} ref={mapRef}>
-             <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+             <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' maxZoom={19} />
              
              {/* Citizen Location */}
              <Marker position={[parseFloat(lat), parseFloat(lng)]} icon={RedIcon}>

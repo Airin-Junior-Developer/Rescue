@@ -279,7 +279,7 @@ function CommandCenter({ user, onLogout }) {
             style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 1000, width: '50px', height: '50px', borderRadius: '50%', background: '#1e293b', border: '2px solid #334155', cursor: 'pointer', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}
           >📍</button>
           <MapContainer center={[lat, lng]} zoom={14} style={{ height: '100%', width: '100%' }} ref={mapRef}>
-             <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+             <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' maxZoom={19} />
              <Marker position={[activeMission.latitude, activeMission.longitude]} icon={RedIcon}>
                <Popup>จุดเกิดเหตุ (Citizen)</Popup>
              </Marker>

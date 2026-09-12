@@ -285,7 +285,7 @@ function AdminDashboard({ user, onLogout }) {
              </button>
              
              <MapContainer center={[13.7563, 100.5018]} zoom={11} style={{ height: '100%', width: '100%' }}>
-                <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' maxZoom={19} />
                 
                 {incidents.map((inc) => (
                     <Marker key={'inc'+inc.id} position={[inc.latitude, inc.longitude]} icon={RedIcon}>
