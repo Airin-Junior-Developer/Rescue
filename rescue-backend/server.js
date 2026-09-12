@@ -154,7 +154,7 @@ async function broadcastOffer(incident_id, drivers, payload) {
 // Global Polling Loop: Find Pending Cases and retry matching every 5 seconds
 setInterval(async () => {
     try {
-        const [rows] = await pool.query('SELECT * FROM incidents WHERE status = "Pending"');
+        const [rows] = await pool.query(`SELECT * FROM incidents WHERE status = 'Pending'`);
         for (const inc of rows) {
             if (!dispatchState[inc.id]) { 
                 const nearbyDriverIds = await nearbyAvailableDrivers(inc.latitude, inc.longitude);
@@ -349,7 +349,7 @@ app.post('/api/incidents/:id/accept', verifyToken, async (req, res) => {
 
     try {
         // Atomic Lock: ONLY update if it is still 'Pending' (hasn't been stolen by someone else yet)
-        const [result] = await pool.query('UPDATE incidents SET assigned_user_id = ?, status = "Accepted", accepted_at = CURRENT_TIMESTAMP WHERE id = ? AND status = "Pending"', [driver_id, incident_id]);
+        const [result] = await pool.query(`UPDATE incidents SET assigned_user_id = ?, status = 'Accepted', accepted_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'`, [driver_id, incident_id]);
 
         if (result.affectedRows === 0) {
             // Someone else beat them to it! (Or it was cancelled)
@@ -411,7 +411,7 @@ app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
         if (!authorized) return res.status(403).json({ error: 'Forbidden' });
         if (authorized.status !== 'Accepted') return res.status(409).json({ error: 'Incident is not active' });
         
-        const [counts] = await pool.query('SELECT COUNT(*) as count FROM incidents WHERE parent_incident_id = ? AND status != "Resolved"', [parent_id]);
+        const [counts] = await pool.query(`SELECT COUNT(*) as count FROM incidents WHERE parent_incident_id = ? AND status != 'Resolved'`, [parent_id]);
         if (counts[0].count >= 3) return res.status(400).json({ error: 'ถึงจำกัดการขอกำลังเสริมแล้ว (Max 3 units)' });
 
         const [parents] = await pool.query('SELECT * FROM incidents WHERE id = ?', [parent_id]);
@@ -446,8 +446,8 @@ app.post('/api/incidents/:id/backup', verifyToken, async (req, res) => {
 app.get('/api/admin/system-status', verifyToken, async (req, res) => {
     if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
     try {
-        const [incidents] = await pool.query('SELECT i.*, u.username as assigned_username FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.status IN ("Pending", "Accepted")');
-        const [history] = await pool.query('SELECT i.*, u.username as assigned_username FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.status IN ("Resolved", "Failed") ORDER BY i.id DESC LIMIT 500');
+        const [incidents] = await pool.query(`SELECT i.*, u.username as assigned_username FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.status IN ('Pending', 'Accepted')`);
+        const [history] = await pool.query(`SELECT i.*, u.username as assigned_username FROM incidents i LEFT JOIN users u ON i.assigned_user_id = u.id WHERE i.status IN ('Resolved', 'Failed') ORDER BY i.id DESC LIMIT 500`);
         const [prank_stats] = await pool.query("SELECT citizen_phone, COUNT(*) as count FROM incidents WHERE cancel_reason = 'ก่อกวน / แจ้งเล่น' GROUP BY citizen_phone ORDER BY count DESC LIMIT 50");
         
         let totalResponseTimeMs = 0;
@@ -534,7 +534,7 @@ app.post('/api/admin/incidents/:id/cancel', verifyToken, async (req, res) => {
         }
         
         console.log("[DEBUG] Updating DB status to Resolved...");
-        await pool.query('UPDATE incidents SET status = "Resolved", cancel_reason = ? WHERE id = ? OR parent_incident_id = ?', [cancel_reason, incident_id, incident_id]);
+        await pool.query(`UPDATE incidents SET status = 'Resolved', cancel_reason = ? WHERE id = ? OR parent_incident_id = ?`, [cancel_reason, incident_id, incident_id]);
         
         console.log("[DEBUG] Emitting sockets...");
         io.to(`incident_room_${incident_id}`).emit('no_drivers'); // Signal Citizen to stop waiting
@@ -635,7 +635,7 @@ app.post('/api/rescuers/register', publicWriteLimiter, async (req, res) => {
 app.get('/api/admin/rescuers/pending', verifyToken, async (req, res) => {
     if (req.user.role?.toLowerCase() !== 'admin') return res.status(403).json({ error: 'Forbidden' });
     try {
-        const [rows] = await pool.query('SELECT u.id, u.username, u.phone, f.name as foundation_name FROM users u LEFT JOIN foundations f ON u.foundation_id = f.id WHERE u.role = "Rescue" AND u.is_approved = FALSE');
+        const [rows] = await pool.query(`SELECT u.id, u.username, u.phone, f.name as foundation_name FROM users u LEFT JOIN foundations f ON u.foundation_id = f.id WHERE u.role = 'Rescue' AND u.is_approved = FALSE`);
         res.json(rows);
     } catch(e) { res.status(500).json({ error: e.message }) }
 });
@@ -661,7 +661,7 @@ app.post('/api/admin/rescuers/:id/reject', verifyToken, async (req, res) => {
 // Fetch active case for Driver
 app.get('/api/incidents/active', verifyToken, async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT * FROM incidents WHERE assigned_user_id = ? AND status = "Accepted" LIMIT 1', [req.user.id]);
+        const [rows] = await pool.query(`SELECT * FROM incidents WHERE assigned_user_id = ? AND status = 'Accepted' LIMIT 1`, [req.user.id]);
         res.json(rows[0] || null);
     } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -710,7 +710,7 @@ app.post('/api/incidents/:id/complete', verifyToken, async (req, res) => {
         const incident = await staffIncidentAccess(req.user, req.params.id);
         if (!incident) return res.status(403).json({ error: 'Forbidden' });
         if (incident.status !== 'Accepted') return res.status(409).json({ error: 'Incident is not active' });
-        await pool.query('UPDATE incidents SET status = "Resolved", resolved_at = CURRENT_TIMESTAMP WHERE id = ? OR parent_incident_id = ?', [req.params.id, req.params.id]);
+        await pool.query(`UPDATE incidents SET status = 'Resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = ? OR parent_incident_id = ?`, [req.params.id, req.params.id]);
 
         const [assignedRows] = await pool.query('SELECT assigned_user_id FROM incidents WHERE (id = ? OR parent_incident_id = ?) AND assigned_user_id IS NOT NULL', [req.params.id, req.params.id]);
         for (const user of assignedRows) {
@@ -783,7 +783,7 @@ io.on('connection', (socket) => {
     };
     const publishPresence = async (data, user, replaceOwner = false) => {
         coordinates(data);
-        const [missions] = await pool.query('SELECT id FROM incidents WHERE assigned_user_id = ? AND status = "Accepted"', [user.id]);
+        const [missions] = await pool.query(`SELECT id FROM incidents WHERE assigned_user_id = ? AND status = 'Accepted'`, [user.id]);
         const status = missions.length ? 'busy' : 'available';
         const state = { status, username: user.username, foundation_id: user.foundation_id, phone: user.phone,
             latitude: data.latitude, longitude: data.longitude, last_seen: Date.now(), socket_id: socket.id };
