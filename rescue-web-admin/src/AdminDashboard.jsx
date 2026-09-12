@@ -1,3 +1,4 @@
+import { Brand, ConnectionStatus, DemoNotice } from './RescueUI';
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -261,21 +262,22 @@ function AdminDashboard({ user, onLogout }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f172a', color: 'white', fontFamily: 'sans-serif' }}>
-      <header style={{ padding: '15px 30px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="admin-shell">
+      <header className="admin-header" style={{ padding: '15px 30px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
          <div>
-            <h1 className="text-gradient" style={{ margin: 0, fontSize: '24px' }}>🛡️ ศูนย์บัญชาการกู้ภัย (God View)</h1>
-            <p style={{ margin: 0, color: '#94a3b8' }}>Admin mode: {user.username}</p>
+            <Brand subtitle="ศูนย์ประสานงานกู้ภัย" />
+            <p style={{ margin: 0, color: '#94a3b8' }}>ผู้ดูแลระบบ · {user.username}</p>
          </div>
          <div>
             <button onClick={openManageModal} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', marginRight: '10px', fontWeight: 'bold' }}>⚙️ จัดการหน่วยกู้ภัย</button>
-            <button onClick={onLogout} style={{ background: 'transparent', color: '#94a3b8', border: '1px solid #475569', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>Log Out</button>
+            <button onClick={onLogout} style={{ background: 'transparent', color: '#94a3b8', border: '1px solid #475569', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>ออกจากระบบ</button>
          </div>
       </header>
       
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="operations-summary"><div><span>รอทีมตอบรับ</span><strong>{incidents.filter(i=>i.status==='Pending').length}</strong></div><div><span>กำลังช่วยเหลือ</span><strong>{incidents.filter(i=>i.status==='Accepted').length}</strong></div><div><span>หน่วยที่เชื่อมต่อ</span><strong>{rescuers.length}</strong></div><div><span>การเชื่อมต่อระบบ</span><ConnectionStatus socket={socket} /></div></div><DemoNotice />
+      <div className="admin-workspace" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
          {/* LEFT MAP */}
-         <div style={{ flex: 2, position: 'relative' }}>
+         <div className="operations-map" style={{ flex: 2, position: 'relative' }}>
              <button 
                  onClick={() => setShowHeatmap(!showHeatmap)} 
                  style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 1000, background: showHeatmap ? '#ef4444' : '#1e293b', color: 'white', border: `2px solid ${showHeatmap ? '#ef4444' : '#334155'}`, padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 4px 6px rgba(0,0,0,0.3)', transition: '0.3s' }}>
@@ -323,7 +325,7 @@ function AdminDashboard({ user, onLogout }) {
          {/* RIGHT DASHBOARD DATA */}
          <div style={{ flex: 1, padding: '20px', background: '#1e293b', overflowY: 'auto' }}>
             <h2 style={{ color: '#10b981', borderBottom: '1px solid #334155', paddingBottom: '10px' }}>🚨 ข้อมูลเหตุฉุกเฉิน (Active Events)</h2>
-            {incidents.length === 0 ? <p style={{ color: '#94a3b8', textAlign: 'center' }}>ไม่มีเหตุฉุกเฉินในขณะนี้ ทุกอย่างปกติดี 🟢</p> : null}
+            {incidents.length === 0 ? <p style={{ color: '#94a3b8', textAlign: 'center' }}>ยังไม่มีเคสที่กำลังดำเนินการ</p> : null}
             
             {incidents.map(inc => (
                <div key={inc.id} style={{ background: '#334155', borderRadius: '8px', padding: '15px', marginBottom: '15px' }}>
@@ -347,7 +349,7 @@ function AdminDashboard({ user, onLogout }) {
                 </h3>
                 <div style={{ display: 'flex', gap: '10px' }}>
                     <input value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} onKeyDown={e=> e.key === 'Enter' && sendBroadcast()} placeholder="พิมพ์ข้อความสั่งการรถกู้ภัย..." style={{ flex: 1, padding: '12px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white', outline: 'none' }} />
-                    <button onClick={sendBroadcast} className="btn" style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ยิงประกาศด่วน 🚀</button>
+                    <button onClick={sendBroadcast} className="btn" style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ส่งประกาศถึงเจ้าหน้าที่</button>
                 </div>
             </div>
 
@@ -358,7 +360,7 @@ function AdminDashboard({ user, onLogout }) {
                 </h3>
                 <div style={{ display: 'flex', gap: '10px' }}>
                     <input value={lineBroadcastMsg} onChange={e=>setLineBroadcastMsg(e.target.value)} onKeyDown={e=> e.key === 'Enter' && sendLineBroadcast()} placeholder="พิมพ์ข่าวสารทั่วไป หรือพยากรณ์อากาศ..." style={{ flex: 1, padding: '12px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white', outline: 'none' }} />
-                    <button onClick={sendLineBroadcast} className="btn" style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ยิงข่าวสาร LINE 🚀</button>
+                    <button onClick={sendLineBroadcast} className="btn" style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', padding: '0 20px', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ส่งข่าวสาร LINE</button>
                 </div>
             </div>
             

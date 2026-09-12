@@ -1,3 +1,4 @@
+import { Brand, ConnectionStatus, DemoNotice } from './RescueUI';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -207,8 +208,8 @@ function CommandCenter({ user, onLogout }) {
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'white', padding: '20px', textAlign: 'center' }}>
          <div style={{ width: '120px', height: '120px', background: '#ef4444', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '50px', marginBottom: '30px' }}>🚨</div>
-         <h1 style={{ color: '#ef4444', margin: 0 }}>🚨 SOS ฉุกเฉิน! (ชิงเคส)</h1>
-         <p style={{ fontSize: '18px', color: '#94a3b8' }}>ใครกดก่อนได้เคสนี้ไป (รัศมี 50km)</p>
+         <h1 style={{ color: '#ef4444', margin: 0 }}>มีคำขอความช่วยเหลือใหม่</h1>
+         <p style={{ fontSize: '18px', color: '#94a3b8' }}>ตรวจรายละเอียดก่อนตอบรับภารกิจ</p>
          
          {incomingMission.prank_count > 0 && (
             <div style={{ marginTop: '20px', background: 'rgba(239, 68, 68, 0.2)', border: '2px solid #ef4444', color: '#fca5a5', padding: '15px', borderRadius: '10px', fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -242,7 +243,7 @@ function CommandCenter({ user, onLogout }) {
                 await axios.post(`${API_URL}/api/incidents/${incomingMission.incident_id}/reject`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }});
             }} style={{ flex: 1, background: 'transparent', color: '#ef4444', padding: '20px', fontSize: '18px', border: '2px solid #ef4444', borderRadius: '12px', cursor: 'pointer' }}>ข้ามเคสนี้</button>
          </div>
-         <p style={{ marginTop: '30px', color: '#ef4444', fontWeight: 'bold' }}>⏳ หากถูกแย่งเคสไปแล้ว หน้านี้จะอัปเดตและดับไปเอง</p>
+         <p style={{ marginTop: '30px', color: '#ef4444', fontWeight: 'bold' }}>เมื่อมีทีมอื่นรับงานแล้ว ระบบจะอัปเดตให้อัตโนมัติ</p>
       </div>
     );
   }
@@ -267,7 +268,7 @@ function CommandCenter({ user, onLogout }) {
                 }
               }
             }} className="btn" style={{ background: '#f59e0b', color: 'white', fontWeight: 'bold' }}>🚨 กำลังเสริม</button>
-            <button onClick={() => { if(window.confirm('คุณแน่ใจหรือไม่ว่าช่วยเหลือเสร็จสิ้นแล้ว? (ส่งผู้ป่วยถึงมือแพทย์ปลอดภัยแล้ว)')) completeMission(); }} className="btn" style={{ background: '#10b981', color: 'white', fontWeight: 'bold' }}>Complete Mission ✅</button>
+            <button onClick={() => { if(window.confirm('คุณแน่ใจหรือไม่ว่าช่วยเหลือเสร็จสิ้นแล้ว? (ส่งผู้ป่วยถึงมือแพทย์ปลอดภัยแล้ว)')) completeMission(); }} className="btn" style={{ background: '#10b981', color: 'white', fontWeight: 'bold' }}>เสร็จสิ้นภารกิจ</button>
           </div>
         </header>
 
@@ -292,7 +293,7 @@ function CommandCenter({ user, onLogout }) {
         <div className="glass-panel" style={{ height: '40vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTopLeftRadius: '20px', borderTopRightRadius: '20px' }}>
            <div style={{ padding: '15px', display: 'flex', alignItems: 'center', justifyContent: 'space-around', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
               <span style={{ color: '#e2e8f0' }}>📞 Citizen: {activeMission.citizen_phone || 'Unknown'}</span>
-              <a href={`tel:${activeMission.citizen_phone}`} className="btn" style={{ background: '#3b82f6', color: '#fff', textDecoration: 'none' }}>Call Now</a>
+              <a href={`tel:${activeMission.citizen_phone}`} className="btn" style={{ background: '#3b82f6', color: '#fff', textDecoration: 'none' }}>โทรหาผู้แจ้ง</a>
            </div>
            
            <div style={{ flex: 1, padding: '15px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }}>
@@ -340,14 +341,14 @@ function CommandCenter({ user, onLogout }) {
 
   // --------------- RENDER IDLE SCREEN ---------------
   return (
-    <div style={{ padding: '20px', height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f172a' }}>
+    <div className="staff-page"><div className="staff-top"><Brand subtitle="พื้นที่ปฏิบัติงานเจ้าหน้าที่" /><ConnectionStatus socket={socket} /></div>
         <div className="glass-panel animate-slide-up" style={{ padding: '40px', textAlign: 'center', maxWidth: '400px', width: '100%' }}>
-            <h1 className="text-gradient">🚑 Driver Companion</h1>
-            <p style={{ color: '#94a3b8', marginBottom: '30px' }}>Role: {user.role} | Unit {user.id}</p>
+            <div className="staff-emblem" aria-hidden="true">+</div><span className="eyebrow">DRIVER COMPANION</span><h1>พร้อมช่วยเหลือ<br />ในทุกเส้นทาง</h1><DemoNotice />
+            <p style={{ color: '#94a3b8', marginBottom: '30px' }}>{user.username} · หน่วยปฏิบัติการ #{user.id}</p>
 
             <div style={{ marginBottom: '20px' }}>
                 <span style={{ display: 'inline-block', width: '15px', height: '15px', borderRadius: '50%', background: isOnline ? '#10b981' : '#64748b', marginRight: '10px' }}></span>
-                <span style={{ color: '#fff', fontSize: '20px' }}>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
+                <span style={{ color: '#fff', fontSize: '20px' }}>{isOnline ? 'เปิดรับงานอยู่' : 'ยังไม่เปิดรับงาน'}</span>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '30px' }}>
@@ -358,10 +359,10 @@ function CommandCenter({ user, onLogout }) {
             <button 
                onClick={toggleOnline} 
                style={{ width: '100%', padding: '16px', fontSize: '18px', borderRadius: '12px', border: 'none', background: isOnline ? '#334155' : '#10b981', color: '#fff', cursor: 'pointer', marginBottom: '20px' }}>
-               {isOnline ? 'Go Offline' : 'Go Online & Ready'}
+               {isOnline ? 'พักการรับงาน' : 'เริ่มปฏิบัติงาน'}
             </button>
 
-            <button onClick={() => { socket.disconnect(); onLogout(); }} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #475569', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>Log Out</button>
+            <button onClick={() => { socket.disconnect(); onLogout(); }} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #475569', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>ออกจากระบบ</button>
         </div>
     </div>
   );

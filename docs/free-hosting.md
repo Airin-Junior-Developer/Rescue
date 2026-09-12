@@ -8,22 +8,28 @@ Approved target: existing Vercel frontends, Render Free Node backend and Free Ke
 - Backend reads Render's `PORT`, and supports `DB_PORT`, `DB_SSL=true`, and the full PEM CA certificate in `DB_SSL_CA`. Certificate verification stays enabled.
 - LINE Login channel ID is configured in the Blueprint. Secrets are entered in provider settings, never committed.
 
-## Remaining deployment steps
+## Deployed services
 
-1. Finish Render account authorization and Aiven sign-in/signup. Choose the actual Aiven Free MySQL plan (1 GB), not a paid trial. Do not enable paid upgrades.
-2. Provision the new database and record its host, port, database, user and CA. Set its credentials only in the intended Render service.
-3. Prepare and validate the current schema before import. `rescue-backend/init.sql` contains obsolete plaintext demo credentials and is not a production bootstrap. Do not import it as-is. Do not upload the existing SQL export or personal incident data without reviewing its contents and migration scope.
-4. Push the reviewed code to GitHub, then create the Render Blueprint with the required environment variables. Review the final price before creation: both services must show $0. Where available set a zero spend limit; do not add payment details for this demo.
-5. Verify MySQL, Redis, authentication and Socket.IO against the new API before setting `VITE_API_URL` to its HTTPS URL in both Vercel projects and deploying them.
-6. Verify the citizen and admin sites and test LINE login with the account owner. Avoid generating real emergency calls or unsolicited LINE messages during smoke checks.
+- Citizen/driver: https://rescue-alpha-seven.vercel.app
+- Admin: https://rescue-admin-eta.vercel.app
+- Backend: https://rescue-api-mw89.onrender.com
+- Render backend: `srv-daihv4bm8hqs73cume60`, Free, Singapore, branch `codex/free-hosting`.
+- Render Redis: `red-daihpq5g1s2s73fdcid0`, Free, Singapore, external connections blocked.
+- Aiven: project `rescue`, service `rescue-mysql`, Free MySQL, six tables initialized from `rescue-backend/schema.sql`.
+- Vercel uses `VITE_RESCUE_API_URL` in Production. It takes priority over the legacy `VITE_API_URL`. Both sites deployed commit `843334d`.
+- Two randomly passworded demo accounts exist. No old personal records or incidents were imported. Passwords were handed off in a private local file, not committed.
 
-## Limits
+## Verification on 2026-09-12
 
-Render Free sleeps after 15 idle minutes and may take about a minute to wake. Its Redis data is ephemeral, suitable here only for online presence. Incidents belong in MySQL. Quota exhaustion can suspend services. Aiven Free can pause inactive databases. These plans do not guarantee continuous availability.
+Backend: 37 tests passed; citizen session: 7 tests passed; both frontends passed lint and build. Ten changed SQL statements passed EXPLAIN against Aiven. Hosted admin/rescue login, admin system status, public foundations and Socket.IO handshake returned HTTP 200. Both production bundles contain the new backend URL. Browser login reached the admin dashboard. LINE bot-info returned HTTP 200 without sending a message. Full LINE mobile login, GPS and incident dispatch have not been tested end to end.
 
-References checked 2026-09-12:
+## Limits and maintenance
+
+For demonstration only: Render Free sleeps after 15 idle minutes and may take about a minute to wake. Redis presence is ephemeral; incidents are stored in MySQL. Aiven may pause inactive free databases. Quotas can suspend service. Existing bundle-size warnings and npm dependency audit findings remain to be assessed.
+
+Render uses a public Git repository and may require a manual deployment after code changes. Vercel production follows `main`. Keep these releases coordinated. Do not upgrade plans or add payment methods for this free demo.
+
+References:
 - https://render.com/docs/free
 - https://render.com/docs/blueprint-spec
 - https://aiven.io/docs/products/mysql/concepts/mysql-free-tier
-
-Current status: configuration prepared and backend tests pass; no Render/Aiven services have been created and Vercel has not been switched.

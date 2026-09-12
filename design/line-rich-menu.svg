@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2500" height="843" viewBox="0 0 2500 843">
+<rect width="2500" height="843" fill="#0c1c31"/>
+<g font-family="Noto Sans Thai,Thonburi,sans-serif">
+<rect x="62" y="40" width="72" height="72" rx="22" fill="#ed4b58"/><path d="M98 57v38M79 76h38" stroke="white" stroke-width="10"/>
+<text x="158" y="85" fill="white" font-family="Arial" font-weight="700" font-size="36" letter-spacing="5">RESCUE CONNECT</text><text x="2410" y="84" text-anchor="end" fill="#b6c4d6" font-size="28">ระบบสาธิต · พร้อมเชื่อมต่อความช่วยเหลือ</text>
+<rect x="40" y="158" width="800" height="645" rx="34" fill="#e74754"/>
+<rect x="860" y="158" width="800" height="645" rx="34" fill="#f3f6f9"/>
+<rect x="1680" y="158" width="780" height="645" rx="34" fill="#20344c"/>
+<circle cx="440" cy="357" r="103" fill="#ffffff18"/><circle cx="440" cy="357" r="77" fill="none" stroke="white" stroke-width="7"/>
+<path d="M440 316v82M399 357h82" stroke="white" stroke-width="15" stroke-linecap="round"/>
+<text x="440" y="550" text-anchor="middle" fill="white" font-size="65" font-weight="700">แจ้งเหตุ SOS</text><text x="440" y="617" text-anchor="middle" fill="#ffe1e4" font-size="32">เปิดแบบฟอร์มขอความช่วยเหลือ</text><text x="440" y="734" text-anchor="middle" fill="white" font-size="36">เริ่มแจ้งเหตุ →</text>
+<circle cx="1260" cy="357" r="103" fill="#e2ebf1"/>
+<path d="M1260 441c-18-23-67-67-67-105a67 67 0 0 1 134 0c0 38-49 82-67 105z" fill="none" stroke="#233c55" stroke-width="8"/><circle cx="1260" cy="336" r="23" fill="#e74754"/>
+<text x="1260" y="550" text-anchor="middle" fill="#17283e" font-size="65" font-weight="700">ติดตามเคส</text><text x="1260" y="617" text-anchor="middle" fill="#62778a" font-size="32">ดูสถานะและพูดคุยกับทีมกู้ภัย</text><text x="1260" y="734" text-anchor="middle" fill="#294963" font-size="36">ดูความคืบหน้า →</text>
+<circle cx="2070" cy="357" r="103" fill="#ffffff09"/>
+<path d="M2070 270l77 28v56c0 52-42 80-77 99-35-19-77-47-77-99v-56z" fill="none" stroke="#bdd5e5" stroke-width="8"/><path d="M2070 315v72M2034 351h72" stroke="#ed6670" stroke-width="12" stroke-linecap="round"/>
+<text x="2070" y="550" text-anchor="middle" fill="white" font-size="65" font-weight="700">สำหรับเจ้าหน้าที่</text><text x="2070" y="617" text-anchor="middle" fill="#bdcddd" font-size="32">เข้าสู่ระบบเพื่อรับงานกู้ภัย</text><text x="2070" y="734" text-anchor="middle" fill="#dae8f3" font-size="36">เข้าสู่ระบบ →</text>
+</g></svg>

@@ -8,6 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
 import liff from '@line/liff';
+import { Brand, ConnectionStatus, DemoNotice } from './RescueUI';
 import { API_URL } from './config';
 import { readIncident, persistPendingIncident, recoverIncident } from './incidentSession';
 
@@ -16,6 +17,7 @@ const iconBaseOpts = { shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leafle
 const RedIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
 const BlueIcon = new L.Icon({ ...iconBaseOpts, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png' });
 
+const LIFF_ID = import.meta.env.VITE_LIFF_ID || '2009894409-w2sSn3rf';
 const socket = io(API_URL, { autoConnect: false });
 
 function CitizenSOS() {
@@ -25,7 +27,7 @@ function CitizenSOS() {
   const submittingRef = useRef(false);
   const [lat, setLat] = useState('13.7563');
   const [lng, setLng] = useState('100.5018');
-  const [isInLine, setIsInLine] = useState(true);
+  const [isInLine, setIsInLine] = useState(false);
 
   // Registration Modal State
   const [showRegister, setShowRegister] = useState(false);
@@ -106,7 +108,7 @@ function CitizenSOS() {
     };
 
     // Initialize LINE LIFF
-    liff.init({ liffId: import.meta.env.VITE_LIFF_ID || '2009894409-w2sSn3rf' })
+    liff.init({ liffId: LIFF_ID })
       .then(() => {
         if (!liff.isInClient() && !liff.isLoggedIn()) {
             setIsInLine(false);
@@ -176,9 +178,10 @@ function CitizenSOS() {
 
   // --------------- SOS HOLD LOGIC ---------------
   function startHold() {
+    if (!isInLine || isHolding || submittingRef.current) return;
     if (!citizenPhone.trim()) {
       toast.warning('กรุณากรอกเบอร์โทรศัพท์ก่อนกดแจ้งเหตุ (Phone Number Required)');
-      setShowRegister(true);
+      document.getElementById('citizen-phone')?.focus();
       return;
     }
     setIsHolding(true);
@@ -279,35 +282,9 @@ function CitizenSOS() {
   };
 
   // --------------- UI RENDERS ---------------
-  if (!isInLine) {
-    return (
-      <div style={{ textAlign: 'center', padding: '50px', fontFamily: 'sans-serif', background: '#0f172a', minHeight: '100vh', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-        <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png" alt="Rescue" style={{ width: '50px', marginBottom: '20px' }} />
-        <h2 style={{ color: '#f8fafc', marginBottom: '10px' }}>🚨 Please open via LINE App</h2>
-        <p style={{ color: '#94a3b8', fontSize: '18px', maxWidth: '400px', lineHeight: '1.5' }}>
-          The Smart Rescue System is designed to be used exclusively through <span style={{ color: '#00c300', fontWeight: 'bold' }}>LINE LIFF</span>.
-        </p>
-        <div style={{ marginTop: '40px', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '15px' }}>
-          <p style={{ color: '#94a3b8', margin: '0 0 10px 0' }}>For Rescuers and Administrators</p>
-          <Link to="/login" style={{ display: 'inline-block', padding: '10px 20px', background: '#3b82f6', color: '#fff', textDecoration: 'none', borderRadius: '8px', fontWeight: 'bold' }}>
-            Go to Command Center
-          </Link>
-          <div style={{ marginTop: '20px' }}>
-            <button onClick={() => {
-                setIsInLine(true);
-                liff.login();
-            }} style={{ background: 'transparent', border: '1px solid #475569', color: '#94a3b8', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>
-              Test in Browser (LINE Login)
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (activeIncident) {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'sans-serif', background: '#0f172a' }}>
+      <div className="mission-screen" style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: '#0f172a' }}><div className="mission-brand"><Brand subtitle="ติดตามความช่วยเหลือ" /><ConnectionStatus socket={socket} /></div>
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.1)', color: '#fff', textAlign: 'center' }}>
           <h2 style={{ margin: '0 0 5px 0' }}>🚨 {activeIncident.driver_name ? `กู้ภัยคุณ ${activeIncident.driver_name} กำลังเดินทางมา!` : 'กู้ภัยกำลังเดินทางมาหาคุณ!'}</h2>
           <p style={{ margin: '5px 0', color: '#10b981', fontWeight: 'bold' }}>
@@ -389,58 +366,43 @@ function CitizenSOS() {
   }
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', padding: '20px', background: '#0f172a' }}>
-      <div className="glass-panel animate-slide-up" style={{ maxWidth: '500px', width: '100%', padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <h1 className="text-gradient" style={{ textAlign: 'center', marginBottom: '10px' }}>🚨 เรียกกู้ภัยด่วน</h1>
-        <p style={{ textAlign: 'center', color: '#94a3b8', marginBottom: '40px' }}>ระบบจะค้นหารถกู้ภัยที่ใกล้ที่สุดและจ่ายงานทันที</p>
-        
-        <input 
-            type="tel"
-            value={citizenPhone} 
-            onChange={(e)=>setCitizenPhone(e.target.value)} 
-            placeholder="เบอร์โทรศัพท์ติดต่อกลับ (Phone)"
-            style={{ width: '100%', padding: '15px', marginBottom: '20px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: '18px', textAlign: 'center' }}
-        />
-
-        <textarea 
-            value={details} 
-            onChange={(e)=>setDetails(e.target.value)} 
-            placeholder="รายละเอียด (ถ้ามี) เช่น รถชนคนบาดเจ็บ..."
-            style={{ width: '100%', height: '80px', padding: '15px', marginBottom: '40px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.5)', color: '#fff' }}
-        />
-
-        {/* MASSIVE SOS BUTTON */}
-        <div style={{ position: 'relative', width: '250px', height: '250px', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '30px' }}>
-            <div style={{
-                position: 'absolute', bottom: 0, left: 0, width: '100%', height: `${holdProgress}%`,
-                background: 'rgba(239, 68, 68, 0.3)', borderRadius: '50%', transition: 'height 0.1s linear'
-            }}></div>
-            <button 
-                onMouseDown={startHold} onMouseUp={stopHold} onMouseLeave={stopHold}
-                onTouchStart={startHold} onTouchEnd={stopHold}
-                style={{
-                  width: '200px', height: '200px', borderRadius: '50%', background: isHolding ? '#dc2626' : '#ef4444',
-                  boxShadow: isHolding ? '0 0 50px rgba(239, 68, 68, 0.8)' : '0 10px 25px rgba(0,0,0,0.5)',
-                  border: '8px solid rgba(255,255,255,0.1)', color: '#fff', fontSize: '32px', fontWeight: 'bold',
-                  cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
-                  transform: isHolding ? 'scale(0.95)' : 'scale(1)', transition: 'all 0.2s', userSelect: 'none'
-                }}
-            >
-              <span>SOS</span>
-              <span style={{ fontSize: '14px', fontWeight: 'normal', marginTop: '10px' }}>กดค้าง 5 วินาที</span>
+    <div className="citizen-page">
+      <header className="citizen-header"><Brand /><ConnectionStatus socket={socket} /></header>
+      <main className="citizen-layout">
+        <section className="citizen-intro">
+          <span className="eyebrow">อุ่นใจ ในทุกการเดินทาง</span>
+          <h1>ความช่วยเหลือ<br />เริ่มต้นที่<span>คุณ</span></h1>
+          <p>แจ้งรายละเอียด แชร์ตำแหน่ง และติดตามทีมกู้ภัย<br className="desktop-only" />ในที่เดียว ผ่าน LINE ของคุณ</p>
+          <div className="rescue-illustration" aria-hidden="true"><div className="route-line" /><span className="map-pin">+</span><div className="ambulance"><span>RESCUE</span><b>+</b><i /><i /></div><span className="illustration-label">พร้อมเชื่อมต่อความช่วยเหลือ</span></div>
+          <div className="steps"><div><b>01</b><span>ระบุข้อมูล</span></div><div><b>02</b><span>กดค้างเพื่อแจ้งเหตุ</span></div><div><b>03</b><span>ติดตามและพูดคุย</span></div></div>
+        </section>
+        <section className="sos-card" aria-labelledby="sos-title">
+          <div className="card-heading"><span className="eyebrow">ขอความช่วยเหลือ</span><span className="small-tag">SOS</span></div>
+          <h2 id="sos-title">แจ้งเหตุให้ทีมกู้ภัย</h2>
+          <p className="muted">กรอกข้อมูลติดต่อก่อนกดปุ่มด้านล่าง</p>
+          <DemoNotice />
+          {new URLSearchParams(window.location.search).get('view') === 'tracking' && !readIncident(localStorage) && <p className="tracking-empty" role="status">ยังไม่มีเคสที่กำลังติดตามบนอุปกรณ์นี้ เมื่อแจ้งเหตุแล้ว สถานะจะปรากฏที่นี่</p>}
+          <label className="field-label" htmlFor="citizen-phone">เบอร์โทรศัพท์ติดต่อกลับ</label>
+          <input id="citizen-phone" type="tel" inputMode="tel" autoComplete="tel" value={citizenPhone} onChange={e=>setCitizenPhone(e.target.value)} placeholder="เช่น 081 234 5678" />
+          <label className="field-label" htmlFor="incident-details">เกิดอะไรขึ้น <span>ไม่บังคับ</span></label>
+          <textarea id="incident-details" value={details} onChange={e=>setDetails(e.target.value)} placeholder="เล่าอาการ จุดสังเกต หรือรายละเอียดที่ทีมควรรู้" rows={3} />
+          {!isInLine && <a className="line-entry" href={`https://liff.line.me/${LIFF_ID}`}>เปิดใน LINE เพื่อแจ้งเหตุ ↗</a>}
+          <div className="sos-ring" style={{ '--progress': `${holdProgress * 3.6}deg` }}>
+            <button disabled={!isInLine} className="sos-trigger" aria-label="กดค้าง 5 วินาทีเพื่อแจ้งเหตุ" onPointerDown={e=>{ e.currentTarget.setPointerCapture(e.pointerId); startHold(); }} onPointerUp={stopHold} onPointerCancel={stopHold} onLostPointerCapture={stopHold}
+              onKeyDown={e=>{ if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); startHold(); } }} onKeyUp={e=>{ if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); stopHold(); } }} onBlur={stopHold}>
+              <strong>SOS</strong><span>{isHolding ? `กำลังยืนยัน ${Math.min(5, Math.floor(holdProgress / 20))}/5` : 'กดค้าง 5 วินาที'}</span>
             </button>
-        </div>
-
-        <Link to="/login" style={{ textDecoration: 'none', color: '#64748b', fontSize: '14px' }}>
-          Staff Login (Driver Companion)
-        </Link>
-      </div>
-
+          </div>
+          <p className="hold-hint">ปล่อยปุ่มก่อนครบเวลาเพื่อยกเลิก</p>
+          <div className="citizen-links"><Link to="/login">เข้าสู่ระบบเจ้าหน้าที่ <span>↗</span></Link><Link to="/register">สมัครเป็นกู้ภัย <span>↗</span></Link></div>
+        </section>
+      </main>
+      <footer className="citizen-footer">RESCUE CONNECT <span>เชื่อมคุณกับทีมช่วยเหลือ</span></footer>
       {isSearching && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.95)', color: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
             <div style={{ width: '80px', height: '80px', background: '#10b981', borderRadius: '50%', marginBottom: '20px', boxShadow: '0 0 30px #10b981' }}></div>
-            <h2 style={{ color: '#10b981', textAlign: 'center' }}>กำลังค้นหากู้ภัยที่ใกล้ที่สุด...</h2>
-            <p style={{ color: '#94a3b8', textAlign: 'center', margin: '10px 20px' }}>โปรดรอสักครู่ ระบบกำลังจับคู่คุณกับรถกู้ภัยที่อยู่ใกล้และพร้อมที่สุด</p>
+            <h2 style={{ color: '#10b981', textAlign: 'center' }}>{searchingIncidentId ? 'ส่งคำขอแล้ว กำลังค้นหาทีมกู้ภัย' : 'กำลังส่งคำขอ กรุณารอสักครู่'}</h2>
+            <p style={{ color: '#94a3b8', textAlign: 'center', margin: '10px 20px' }}>{searchingIncidentId ? 'ยังไม่มีทีมตอบรับในขณะนี้ ระบบจะอัปเดตให้อัตโนมัติเมื่อมีเจ้าหน้าที่รับงาน' : 'กำลังเชื่อมต่อเพื่อบันทึกคำขอ ระบบยังไม่ได้ยืนยันการรับแจ้ง'}</p>
             {searchingIncidentId && <p style={{ fontSize: '14px', color: '#475569' }}>(Tracking ID: #{searchingIncidentId})</p>}
         </div>
       )}

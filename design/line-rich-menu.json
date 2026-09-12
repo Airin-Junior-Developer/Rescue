@@ -1,0 +1,50 @@
+{
+  "size": {
+    "width": 2500,
+    "height": 843
+  },
+  "selected": true,
+  "name": "Rescue Connect 2026-09",
+  "chatBarText": "เมนูช่วยเหลือ",
+  "areas": [
+    {
+      "bounds": {
+        "x": 0,
+        "y": 158,
+        "width": 850,
+        "height": 685
+      },
+      "action": {
+        "type": "uri",
+        "label": "แจ้งเหตุ SOS",
+        "uri": "https://liff.line.me/2009894409-w2sSn3rf"
+      }
+    },
+    {
+      "bounds": {
+        "x": 850,
+        "y": 158,
+        "width": 820,
+        "height": 685
+      },
+      "action": {
+        "type": "uri",
+        "label": "ติดตามเคส",
+        "uri": "https://liff.line.me/2009894409-w2sSn3rf/?view=tracking"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1670,
+        "y": 158,
+        "width": 830,
+        "height": 685
+      },
+      "action": {
+        "type": "uri",
+        "label": "สำหรับเจ้าหน้าที่",
+        "uri": "https://rescue-alpha-seven.vercel.app/login"
+      }
+    }
+  ]
+}
