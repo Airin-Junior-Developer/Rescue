@@ -11,6 +11,11 @@ test('isAllowedOrigin allows known localhost dev origins', () => {
   assert.strictEqual(isAllowedOrigin('http://127.0.0.1:3002'), true);
 });
 
+test('allows the built-in HTTPS citizen dev server on loopback', () => {
+  assert.strictEqual(isAllowedOrigin('https://127.0.0.1:5173'), true);
+  assert.strictEqual(isAllowedOrigin('https://localhost:5173'), true);
+});
+
 test('isAllowedOrigin allows any vercel.app subdomain', () => {
   assert.strictEqual(isAllowedOrigin('https://rescue-frontend-abc123.vercel.app'), true);
 });

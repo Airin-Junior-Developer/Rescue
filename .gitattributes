@@ -1,0 +1,15 @@
+# Keep legacy database records and deployment-specific material out of source archives.
+/rescue_db_export.sql export-ignore
+/design/line-rich-menu* export-ignore
+/docs/free-hosting.md export-ignore
+/render.yaml export-ignore
+/TROUBLESHOOTING.txt export-ignore
+/fix_urls.js export-ignore
+/replace_api.js export-ignore
+/rescue-backend/init.sql export-ignore
+/rescue-backend/resetAdmin.js export-ignore
+/rescue-backend/hashPasswords.js export-ignore
+/rescue-backend/removeDemoAccounts.js export-ignore
+/rescue-backend/fix_phone.js export-ignore
+/rescue-backend/grab_migrate.js export-ignore
+/rescue-backend/migrate.js export-ignore
