@@ -9,6 +9,7 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
 import liff from '@line/liff';
 import { Brand, ConnectionStatus, DemoNotice } from './RescueUI';
+import { useCitizenLocation } from './useCitizenLocation';
 import { API_URL } from './config';
 import { readIncident, persistPendingIncident, recoverIncident } from './incidentSession';
 
@@ -25,8 +26,7 @@ function CitizenSOS() {
   const [citizenPhone, setCitizenPhone] = useState('');
   const citizenSessionRef = useRef(null);
   const submittingRef = useRef(false);
-  const [lat, setLat] = useState('13.7563');
-  const [lng, setLng] = useState('100.5018');
+  const location = useCitizenLocation();
   const [isInLine, setIsInLine] = useState(false);
 
   // Registration Modal State
@@ -78,13 +78,6 @@ function CitizenSOS() {
   }, [fetchChatHistory]);
 
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        setLat(pos.coords.latitude.toString());
-        setLng(pos.coords.longitude.toString());
-      });
-    }
-
     const handleLiffAuth = () => {
         setIsInLine(true);
         if (liff.isLoggedIn()) {
@@ -178,7 +171,9 @@ function CitizenSOS() {
 
   // --------------- SOS HOLD LOGIC ---------------
   function startHold() {
-    if (!isInLine || isHolding || submittingRef.current) return;
+    if (!isInLine || holdTimerRef.current !== null || submittingRef.current) return;
+    const position = location.getFreshPosition();
+    if (!position) return;
     if (!citizenPhone.trim()) {
       toast.warning('กรุณากรอกเบอร์โทรศัพท์ก่อนกดแจ้งเหตุ (Phone Number Required)');
       document.getElementById('citizen-phone')?.focus();
@@ -196,7 +191,7 @@ function CitizenSOS() {
 
     holdTimerRef.current = setTimeout(() => {
       stopHold();
-      submitSOS();
+      submitSOS(position);
     }, 5000);
   };
 
@@ -221,16 +216,19 @@ function CitizenSOS() {
     setHoldProgress(0);
     clearTimeout(holdTimerRef.current);
     clearInterval(progressTimerRef.current);
+    holdTimerRef.current = null;
   };
 
-  async function submitSOS() {
+  async function submitSOS(heldPosition) {
     if (submittingRef.current || readIncident(localStorage)) return;
+    const position = location.getFreshPosition();
+    if (!position || position !== heldPosition) return;
     submittingRef.current = true;
     try {
       toast.info('🔍 กำลังค้นหารถกู้ภัยที่ใกล้ที่สุดให้คุณ...');
       setIsSearching(true);
       const res = await axios.post(`${API_URL}/api/incidents`, {
-        details, latitude: parseFloat(lat), longitude: parseFloat(lng), citizen_phone: citizenPhone
+        details, latitude: position.latitude, longitude: position.longitude, citizen_phone: citizenPhone
       });
       persistPendingIncident(localStorage, res.data);
       setSearchingIncidentId(res.data.incident_id);
@@ -282,7 +280,16 @@ function CitizenSOS() {
   };
 
   // --------------- UI RENDERS ---------------
+  const locationNotice = (
+    <div className="location-notice">
+      <span role="status">{location.message}</span>
+      {(location.status === 'error' || location.status === 'expired') && (
+        <button type="button" onClick={() => { stopHold(); location.retry(); }}>ขอตำแหน่งอีกครั้ง</button>
+      )}
+    </div>
+  );
   if (activeIncident) {
+    const point = location.position && [location.position.latitude, location.position.longitude];
     return (
       <div className="mission-screen" style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: '#0f172a' }}><div className="mission-brand"><Brand subtitle="ติดตามความช่วยเหลือ" /><ConnectionStatus socket={socket} /></div>
         <div style={{ padding: '20px', background: 'rgba(255,255,255,0.1)', color: '#fff', textAlign: 'center' }}>
@@ -294,12 +301,12 @@ function CitizenSOS() {
         </div>
         
         <div style={{ flex: 1, position: 'relative' }}>
-          <MapContainer center={[parseFloat(lat), parseFloat(lng)]} zoom={14} style={{ height: '100%', width: '100%' }} ref={mapRef}>
+          {point ? <MapContainer center={point} zoom={14} style={{ height: '100%', width: '100%' }} ref={mapRef}>
              <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' maxZoom={19} />
              
              {/* Citizen Location */}
-             <Marker position={[parseFloat(lat), parseFloat(lng)]} icon={RedIcon}>
-               <Popup>จุดเกิดเหตุ (คุณอยู่ที่นี่)</Popup>
+             <Marker position={point} icon={RedIcon}>
+               <Popup>ตำแหน่งล่าสุดที่อุปกรณ์รายงาน</Popup>
              </Marker>
 
              {/* Rescuer Location */}
@@ -309,8 +316,8 @@ function CitizenSOS() {
                </Marker>
              )}
 
-             <RoutingMachine citizen={[parseFloat(lat), parseFloat(lng)]} rescuer={rescuerLoc} setRouteInfo={setRouteInfo} />
-          </MapContainer>
+             <RoutingMachine citizen={point} rescuer={rescuerLoc} setRouteInfo={setRouteInfo} />
+          </MapContainer> : locationNotice}
         </div>
 
         {/* Chat / Call Drawer */}
@@ -387,8 +394,9 @@ function CitizenSOS() {
           <label className="field-label" htmlFor="incident-details">เกิดอะไรขึ้น <span>ไม่บังคับ</span></label>
           <textarea id="incident-details" value={details} onChange={e=>setDetails(e.target.value)} placeholder="เล่าอาการ จุดสังเกต หรือรายละเอียดที่ทีมควรรู้" rows={3} />
           {!isInLine && <a className="line-entry" href={`https://liff.line.me/${LIFF_ID}`}>เปิดใน LINE เพื่อแจ้งเหตุ ↗</a>}
+          {locationNotice}
           <div className="sos-ring" style={{ '--progress': `${holdProgress * 3.6}deg` }}>
-            <button disabled={!isInLine} className="sos-trigger" aria-label="กดค้าง 5 วินาทีเพื่อแจ้งเหตุ" onPointerDown={e=>{ e.currentTarget.setPointerCapture(e.pointerId); startHold(); }} onPointerUp={stopHold} onPointerCancel={stopHold} onLostPointerCapture={stopHold}
+            <button disabled={!isInLine || location.status !== 'ready'} className="sos-trigger" aria-label="กดค้าง 5 วินาทีเพื่อแจ้งเหตุ" onPointerDown={e=>{ e.currentTarget.setPointerCapture(e.pointerId); startHold(); }} onPointerUp={stopHold} onPointerCancel={stopHold} onLostPointerCapture={stopHold}
               onKeyDown={e=>{ if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); startHold(); } }} onKeyUp={e=>{ if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); stopHold(); } }} onBlur={stopHold}>
               <strong>SOS</strong><span>{isHolding ? `กำลังยืนยัน ${Math.min(5, Math.floor(holdProgress / 20))}/5` : 'กดค้าง 5 วินาที'}</span>
             </button>

@@ -249,3 +249,8 @@ input,textarea,select {font-size:16px;min-width:0;}
 @media(max-width:700px){.citizen-header{padding:18px 20px;align-items:flex-start;}.citizen-header .connection-status{font-size:10px;max-width:110px;padding-top:4px;}.rescue-brand strong{font-size:13px;}.rescue-brand small{font-size:9px;}.rescue-mark{width:36px;height:36px;font-size:30px;border-radius:11px;}.citizen-layout{display:block;padding:25px 18px;}.citizen-intro h1{font-size:34px;letter-spacing:-1px;margin:8px 0;}.citizen-intro h1 br{display:none;}.citizen-intro>p{font-size:12px;}.rescue-illustration,.steps,.desktop-only{display:none;}.citizen-intro{padding:0 4px 20px;}.sos-card{padding:23px;border-radius:20px;}.sos-card h2{font-size:21px;}.citizen-footer{margin:0 22px;padding:20px 0;font-size:9px;}.citizen-header .rescue-brand{gap:8px;}}
 
 .line-entry{display:block;margin:20px 0 0;padding:12px;text-align:center;background:#07894f;color:white;border-radius:10px;text-decoration:none;font-size:13px;font-weight:600;}
+
+.location-notice { margin: 12px 0; text-align: center; font-size: 14px; }
+.location-notice button { display: block; margin: 6px auto 0; padding: 8px 14px; cursor: pointer; }
+.sos-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.mission-screen .location-notice { color: white; padding: 16px; }
